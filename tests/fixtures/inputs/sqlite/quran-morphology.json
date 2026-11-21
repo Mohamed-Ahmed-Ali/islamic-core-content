@@ -1,0 +1,133 @@
+{
+  "roots": [
+    {
+      "id": 1,
+      "root_buckwalter": "smw",
+      "root_ar": "سمو",
+      "root_ar_spaced": "س م و",
+      "total_occurrences": 381,
+      "verb_occurrences": 0,
+      "noun_occurrences": 381,
+      "frequency_rank": 1
+    },
+    {
+      "id": 2,
+      "root_buckwalter": "Alh",
+      "root_ar": "اله",
+      "root_ar_spaced": "ا ل ه",
+      "total_occurrences": 2851,
+      "verb_occurrences": 0,
+      "noun_occurrences": 2851,
+      "frequency_rank": 2
+    }
+  ],
+  "lemmas": [
+    {
+      "id": 1,
+      "lemma_buckwalter": "{som",
+      "lemma_ar": "ٱسْم",
+      "root_id": 1,
+      "primary_pos": "N",
+      "occurrence_count": 39,
+      "frequency_rank": 1
+    },
+    {
+      "id": 2,
+      "lemma_buckwalter": "All~ah",
+      "lemma_ar": "ٱللَّه",
+      "root_id": 2,
+      "primary_pos": "PN",
+      "occurrence_count": 2699,
+      "frequency_rank": 2
+    }
+  ],
+  "verb_concordance": [
+    {
+      "id": 1,
+      "root_id": 1,
+      "lemma_id": 1,
+      "verb_ar": "سَمَّى",
+      "verb_buckwalter": "sam~aY",
+      "root_ar": "سمو",
+      "verb_form": 2,
+      "verb_form_roman": "II",
+      "total_count": 1,
+      "perf_count": 1,
+      "impf_count": 0,
+      "impv_count": 0,
+      "active_count": 1,
+      "passive_count": 0,
+      "frequency_rank": 1
+    }
+  ],
+  "words": [
+    {
+      "id": 1,
+      "ayah_id": 1,
+      "surah_id": 1,
+      "ayah_number": 1,
+      "word_number": 1,
+      "word_key": "1:1:1",
+      "word_ar_uthmani": "بِسْمِ",
+      "word_ar_clean": "بسم",
+      "primary_pos": "N",
+      "is_verb": 0,
+      "root_id": 1,
+      "lemma_id": 1,
+      "verb_concordance_id": null,
+      "verb_form": null,
+      "verb_tense": null,
+      "verb_voice": null
+    },
+    {
+      "id": 2,
+      "ayah_id": 1,
+      "surah_id": 1,
+      "ayah_number": 1,
+      "word_number": 2,
+      "word_key": "1:1:2",
+      "word_ar_uthmani": "ٱللَّهِ",
+      "word_ar_clean": "ٱلله",
+      "primary_pos": "PN",
+      "is_verb": 0,
+      "root_id": 2,
+      "lemma_id": 2,
+      "verb_concordance_id": null,
+      "verb_form": null,
+      "verb_tense": null,
+      "verb_voice": null
+    }
+  ],
+  "morphology_segments": [
+    {
+      "id": 1,
+      "word_id": 1,
+      "segment_number": 1,
+      "segment_role": "PREFIX",
+      "form_buckwalter": "bi",
+      "form_ar": "بِ",
+      "pos_tag": "P",
+      "features_raw": "PREFIX|P"
+    },
+    {
+      "id": 2,
+      "word_id": 1,
+      "segment_number": 2,
+      "segment_role": "STEM",
+      "form_buckwalter": "somi",
+      "form_ar": "سْمِ",
+      "pos_tag": "N",
+      "features_raw": "STEM|POS:N|LEM:{som|ROOT:smw"
+    },
+    {
+      "id": 3,
+      "word_id": 2,
+      "segment_number": 1,
+      "segment_role": "STEM",
+      "form_buckwalter": "{ll~ahi",
+      "form_ar": "ٱللَّهِ",
+      "pos_tag": "PN",
+      "features_raw": "STEM|POS:PN|LEM:All~ah|ROOT:Alh"
+    }
+  ]
+}

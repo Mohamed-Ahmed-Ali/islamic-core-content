@@ -1,0 +1,59 @@
+{
+  "surahs": [
+    {
+      "id": 1,
+      "name_ar": "الفاتحة",
+      "name_tname": "Al-Faatiha",
+      "name_en": "The Opening",
+      "revelation_type": "Meccan",
+      "revelation_order": 5,
+      "ayah_count": 7,
+      "ruku_count": 1,
+      "start_ayah_id": 1
+    }
+  ],
+  "ayahs": [
+    {
+      "id": 1,
+      "surah_id": 1,
+      "ayah_number": 1,
+      "verse_key": "1:1",
+      "text_uthmani": "بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ",
+      "text_simple_clean": "بسم الله رَبِّ الرحيم",
+      "juz": 1,
+      "hizb_quarter": 1,
+      "manzil": 1,
+      "ruku": 1,
+      "page_madani": 1,
+      "sajdah_type": null
+    },
+    {
+      "id": 2,
+      "surah_id": 1,
+      "ayah_number": 2,
+      "verse_key": "1:2",
+      "text_uthmani": "ٱلْحَمْدُ لِلَّهِ رَبِّ ٱلْعَـٰلَمِينَ",
+      "text_simple_clean": "الحمد لله إله العالمين",
+      "juz": 1,
+      "hizb_quarter": 1,
+      "manzil": 1,
+      "ruku": 1,
+      "page_madani": 1,
+      "sajdah_type": null
+    },
+    {
+      "id": 3,
+      "surah_id": 1,
+      "ayah_number": 3,
+      "verse_key": "1:3",
+      "text_uthmani": "ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ",
+      "text_simple_clean": "الرحمن الرحيم",
+      "juz": 1,
+      "hizb_quarter": 1,
+      "manzil": 1,
+      "ruku": 1,
+      "page_madani": 1,
+      "sajdah_type": null
+    }
+  ]
+}

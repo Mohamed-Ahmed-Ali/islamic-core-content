@@ -1,0 +1,61 @@
+{
+  "books": [
+    {
+      "id": 1,
+      "number": "1",
+      "nameAr": "كتاب",
+      "nameEn": null
+    }
+  ],
+  "chapters": [
+    {
+      "id": 1,
+      "bookId": 1,
+      "number": null,
+      "titleAr": null,
+      "titleEn": null
+    }
+  ],
+  "hadiths": [
+    {
+      "id": 1,
+      "bookId": 1,
+      "chapterId": 1,
+      "hadithNumber": "1a",
+      "urn": null,
+      "arabicFull": "رَبِّ",
+      "englishFull": null,
+      "englishNarrator": null,
+      "englishBody": null,
+      "gradeAr": null,
+      "gradeEn": null,
+      "reference": {
+        "inBook": "Book 1, Hadith 1",
+        "uscMsa": null
+      },
+      "textSplitMode": "unsplit_raw",
+      "arabicSanad": null,
+      "arabicMatn": null
+    },
+    {
+      "id": 2,
+      "bookId": 1,
+      "chapterId": 1,
+      "hadithNumber": "1b",
+      "urn": null,
+      "arabicFull": "إسناد رَبِّ",
+      "englishFull": "mercy",
+      "englishNarrator": null,
+      "englishBody": "mercy",
+      "gradeAr": null,
+      "gradeEn": null,
+      "reference": {
+        "inBook": null,
+        "uscMsa": null
+      },
+      "textSplitMode": "source_verified",
+      "arabicSanad": "إسناد",
+      "arabicMatn": "رَبِّ"
+    }
+  ]
+}

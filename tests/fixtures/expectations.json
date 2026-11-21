@@ -1,0 +1,87 @@
+{
+  "packs": {
+    "quran-core": {
+      "keys": ["1:1", "1:2", "1:3"],
+      "coverage": {
+        "expected_total": 3,
+        "ar_present": 3
+      },
+      "fts": [
+        {"table": "ayahs_fts", "query": "رَبِّ", "rowIds": [1]},
+        {"table": "ayahs_fts", "query": "رب", "rowIds": [1]},
+        {"table": "ayahs_fts", "query": "كتب", "rowIds": []}
+      ]
+    },
+    "quran-scripts-extended": {
+      "keys": ["1:1", "1:2", "1:3"],
+      "coverage": {
+        "expected_total": 3,
+        "ar_present": 3
+      },
+      "fts": []
+    },
+    "quran-tr-en-fixture": {
+      "keys": ["1:1", "1:2", "1:3"],
+      "coverage": {
+        "expected_total": 3,
+        "en_present": 3,
+        "en_missing": 0
+      },
+      "fts": [
+        {"table": "translations_fts", "query": "mercy", "rowIds": [1]},
+        {"table": "translations_fts", "query": "absent", "rowIds": []}
+      ]
+    },
+    "quran-tafsir-ar-fixture": {
+      "keys": ["1:1", "1:2", "1:3"],
+      "coverage": {
+        "expected_total": 3,
+        "ar_present": 3
+      },
+      "fts": [
+        {"table": "tafsir_fts", "query": "رَبِّ", "rowIds": [1]},
+        {"table": "tafsir_fts", "query": "رب", "rowIds": [1]},
+        {"table": "tafsir_fts", "query": "كتب", "rowIds": []}
+      ]
+    },
+    "quran-morphology": {
+      "keys": ["1:1:1", "1:1:2"],
+      "coverage": {
+        "expected_total": 2,
+        "ar_present": 2
+      },
+      "fts": []
+    },
+    "quran-wbw-en": {
+      "keys": ["1:1:1", "1:1:2"],
+      "coverage": {
+        "expected_total": 2,
+        "ar_present": 2,
+        "en_present": 2,
+        "en_missing": 0
+      },
+      "fts": [
+        {"table": "word_translations_fts", "query": "mercy", "rowIds": [1]},
+        {"table": "word_translations_fts", "query": "absent", "rowIds": []}
+      ]
+    },
+    "hadith-fixture": {
+      "keys": [1, 2],
+      "coverage": {
+        "expected_total": 2,
+        "ar_present": 2,
+        "en_present": 1,
+        "en_missing": 1
+      },
+      "fts": [
+        {"table": "hadiths_fts", "query": "رَبِّ", "rowIds": [2]},
+        {"table": "hadiths_fts", "query": "رب", "rowIds": [2]},
+        {"table": "hadiths_fts", "query": "كتب", "rowIds": []},
+        {"table": "hadiths_fts", "query": "mercy", "rowIds": [2]},
+        {"table": "hadiths_fts", "query": "absent", "rowIds": []}
+      ]
+    },
+    "audio-adhan-core": {}
+  },
+  "audioSlugs": ["fixture"]
+}

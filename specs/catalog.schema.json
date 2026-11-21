@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://islamic-core-content/specs/catalog.schema.json",
+  "title": "IslamicContentCatalog",
+  "description": "Schema for catalog/catalog.json distribution manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "catalogVersion",
+    "generatedAt",
+    "releaseTag",
+    "packs"
+  ],
+  "properties": {
+    "catalogVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "generatedAt": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z(?!\\n)$"
+    },
+    "releaseTag": {
+      "type": "string",
+      "pattern": "^content-v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?!\\n)$"
+    },
+    "packs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "category",
+              "version",
+              "format",
+              "languages",
+              "completeness",
+              "licenseRef",
+              "required",
+              "compression",
+              "schemaVersion",
+              "url",
+              "sizeBytes",
+              "sha256",
+              "coverage",
+              "requiresFts5"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(?!\\n)$"
+              },
+              "category": {
+                "type": "string",
+                "enum": ["quran", "hadith"]
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?!\\n)$"
+              },
+              "format": {
+                "type": "string",
+                "const": "sqlite"
+              },
+              "languages": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2}(?!\\n)$"
+                }
+              },
+              "completeness": {
+                "type": "string",
+                "enum": ["complete", "partial"]
+              },
+              "licenseRef": {
+                "type": "string",
+                "pattern": "^sources/licenses/[a-z0-9]+(-[a-z0-9]+)*\\.json(?!\\n)$"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "compression": {
+                "type": "string",
+                "const": "none"
+              },
+              "schemaVersion": {
+                "type": "integer",
+                "const": 1
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https://.*\\.db(?!\\n)$"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}(?!\\n)$"
+              },
+              "coverage": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["expected", "available"],
+                "properties": {
+                  "expected": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "available": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "requiresFts5": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "category",
+              "version",
+              "format",
+              "languages",
+              "completeness",
+              "licenseRef",
+              "required",
+              "audioManifestRef"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(?!\\n)$"
+              },
+              "category": {
+                "type": "string",
+                "const": "audio"
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?!\\n)$"
+              },
+              "format": {
+                "type": "string",
+                "const": "audio"
+              },
+              "languages": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z]{2}(?!\\n)$"
+                }
+              },
+              "completeness": {
+                "type": "string",
+                "enum": ["complete", "partial"]
+              },
+              "licenseRef": {
+                "type": "string",
+                "pattern": "^sources/licenses/[a-z0-9]+(-[a-z0-9]+)*\\.json(?!\\n)$"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "audioManifestRef": {
+                "type": "string",
+                "const": "audio-manifest.json"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

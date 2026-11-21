@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://islamic-core-content/specs/audio-manifest.schema.json",
+  "title": "IslamicAudioManifest",
+  "description": "Schema for catalog/audio-manifest.json distribution manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "audioManifestVersion",
+    "releaseTag",
+    "packId",
+    "tracks"
+  ],
+  "properties": {
+    "audioManifestVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "releaseTag": {
+      "type": "string",
+      "pattern": "^content-v(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?!\\n)$"
+    },
+    "packId": {
+      "type": "string",
+      "const": "audio-adhan-core"
+    },
+    "tracks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "reciter",
+          "full",
+          "ios"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*(?!\\n)$"
+          },
+          "reciter": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "full": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "filename",
+              "url",
+              "sizeBytes",
+              "sha256",
+              "codec",
+              "durationSeconds"
+            ],
+            "properties": {
+              "filename": {
+                "type": "string",
+                "pattern": "^adhan-[a-z0-9]+(-[a-z0-9]+)*-full\\.m4a(?!\\n)$"
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https://.*(?!\\n)$"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}(?!\\n)$"
+              },
+              "codec": {
+                "type": "string",
+                "const": "aac"
+              },
+              "durationSeconds": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          },
+          "ios": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "filename",
+              "url",
+              "sizeBytes",
+              "sha256",
+              "codec",
+              "durationSeconds"
+            ],
+            "properties": {
+              "filename": {
+                "type": "string",
+                "pattern": "^adhan-[a-z0-9]+(-[a-z0-9]+)*-ios-notif\\.caf(?!\\n)$"
+              },
+              "url": {
+                "type": "string",
+                "pattern": "^https://.*(?!\\n)$"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}(?!\\n)$"
+              },
+              "codec": {
+                "type": "string",
+                "const": "adpcm_ima_qt"
+              },
+              "durationSeconds": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "word_translations": [
+    {
+      "id": 1,
+      "ayah_id": 1,
+      "word_number": 1,
+      "word_key": "1:1:1",
+      "text_uthmani": "بِسْمِ",
+      "translation": "In the name of mercy",
+      "transliteration": "bismi"
+    },
+    {
+      "id": 2,
+      "ayah_id": 1,
+      "word_number": 2,
+      "word_key": "1:1:2",
+      "text_uthmani": "ٱللَّهِ",
+      "translation": "Allah",
+      "transliteration": "Allahi"
+    }
+  ]
+}

@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://islamic-core-content/specs/inputs/hadith-input.schema.json",
+  "title": "HadithInputCollection",
+  "description": "Validation schema for raw-inputs/hadith/{book}.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "books",
+    "chapters",
+    "hadiths"
+  ],
+  "properties": {
+    "books": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "number",
+          "nameAr",
+          "nameEn"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "number": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "nameAr": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "nameEn": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "chapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "bookId",
+          "number",
+          "titleAr",
+          "titleEn"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "bookId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "number": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "titleAr": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "titleEn": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "hadiths": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "bookId",
+          "chapterId",
+          "hadithNumber",
+          "urn",
+          "arabicFull",
+          "englishFull",
+          "englishNarrator",
+          "englishBody",
+          "gradeAr",
+          "gradeEn",
+          "reference",
+          "textSplitMode",
+          "arabicSanad",
+          "arabicMatn"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "bookId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "chapterId": {
+            "type": ["integer", "null"],
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          "hadithNumber": {
+            "type": "string",
+            "pattern": "\\S"
+          },
+          "urn": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "arabicFull": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "englishFull": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "englishNarrator": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "englishBody": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "gradeAr": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "gradeEn": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "reference": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "inBook",
+              "uscMsa"
+            ],
+            "properties": {
+              "inBook": {
+                "type": ["string", "null"],
+                "pattern": "\\S"
+              },
+              "uscMsa": {
+                "type": ["string", "null"],
+                "pattern": "\\S"
+              }
+            }
+          },
+          "textSplitMode": {
+            "type": "string",
+            "enum": [
+              "unsplit_raw",
+              "source_verified"
+            ]
+          },
+          "arabicSanad": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          },
+          "arabicMatn": {
+            "type": ["string", "null"],
+            "pattern": "\\S"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "textSplitMode": {
+                  "const": "unsplit_raw"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "arabicSanad": {
+                  "type": "null"
+                },
+                "arabicMatn": {
+                  "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "textSplitMode": {
+                  "const": "source_verified"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "arabicFull": {
+                  "type": "string"
+                },
+                "arabicSanad": {
+                  "type": "string"
+                },
+                "arabicMatn": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
