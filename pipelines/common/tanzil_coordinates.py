@@ -48,6 +48,81 @@ def _parse_canonical_int(val: str, *, allow_zero: bool = False, field_name: str 
 
 _XML_DECL_ENCODING_RE = re.compile(r"""^<\?xml\s+[^>]*?encoding\s*=\s*(['"])(.*?)\1""", re.IGNORECASE | re.DOTALL)
 
+_EDITION_NOTICE_ID_LINES: dict[str, bytes] = {
+    "tanzil/en.pickthall.xml": b"#  ID: en.pickthall",
+    "tanzil/ar.jalalayn.xml": b"#  ID: ar.jalalayn",
+}
+
+_XML_DECL_STRICT_RE = re.compile(
+    rb"""^<\?xml[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(['"])1\.[0-9]+\1"""
+    rb"""(?:[ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(['"])([A-Za-z0-9._-]+)\2)?"""
+    rb"""(?:[ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(['"])(?:yes|no)\4)?"""
+    rb"""[ \t\r\n]*\?>"""
+)
+
+
+def _strip_edition_leading_notice(
+    raw_bytes: bytes,
+    *,
+    locked_path: str,
+    context: str = "",
+) -> bytes:
+    """Validate and strip the single leading notice comment for Pickthall or Jalalayn."""
+    m = _XML_DECL_STRICT_RE.match(raw_bytes)
+    if not m:
+        raise ValueError(f"Valid XML declaration required at start of edition XML {context}")
+
+    decl_end = m.end()
+    idx = decl_end
+    while idx < len(raw_bytes) and raw_bytes[idx : idx + 1] in (b" ", b"\t", b"\r", b"\n"):
+        idx += 1
+
+    if not raw_bytes.startswith(b"<!--", idx):
+        raise ValueError(
+            f"Expected leading notice comment block immediately following XML declaration and whitespace in {context}"
+        )
+
+    comm_start = idx
+    comm_end = raw_bytes.find(b"-->", comm_start)
+    if comm_end == -1:
+        raise ValueError(f"Unterminated leading notice comment block in {context}")
+    comm_end += 3
+
+    notice_bytes = raw_bytes[comm_start:comm_end]
+    if b"<!--" in notice_bytes[4:]:
+        raise ValueError(f"Nested comment opener '<!--' in leading notice block in {context}")
+
+    try:
+        notice_text = notice_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Leading notice is not valid UTF-8 {context}: {exc}") from exc
+    if "\ufffd" in notice_text:
+        raise ValueError(f"Replacement character U+FFFD detected in leading notice {context}")
+
+    for ch in notice_text:
+        cp = ord(ch)
+        if cp == 0x9 or cp == 0xA or cp == 0xD or (0x20 <= cp <= 0xD7FF) or (0xE000 <= cp < 0xFFFD) or (0x10000 <= cp <= 0x10FFFF):
+            continue
+        raise ValueError(f"Invalid XML character in leading notice {context}")
+
+    expected_id_line = _EDITION_NOTICE_ID_LINES[locked_path]
+    lines = re.split(rb"\r\n|\r|\n", notice_bytes)
+    found_expected = False
+    for line in lines:
+        if line.startswith(b"#  ID:"):
+            if line != expected_id_line:
+                raise ValueError(
+                    f"Wrong edition in leading notice in {context}"
+                )
+            found_expected = True
+
+    if not found_expected:
+        raise ValueError(
+            f"Missing expected edition line in leading notice in {context}"
+        )
+
+    return raw_bytes[:comm_start] + raw_bytes[comm_end:]
+
 
 def _check_string_for_fffd(text: str, context: str = "") -> None:
     if "\ufffd" in text:
@@ -370,7 +445,17 @@ def load_tanzil_text(
     if not path.is_file():
         raise FileNotFoundError(f"Scripture file not found: {path}")
 
-    root = _parse_strict_xml_from_bytes(path.read_bytes(), context=f"{path} ({locked_path})")
+    raw_bytes = path.read_bytes()
+    if locked_path in _EDITION_NOTICE_ID_LINES:
+        parser_bytes = _strip_edition_leading_notice(
+            raw_bytes,
+            locked_path=locked_path,
+            context=f"{path} ({locked_path})",
+        )
+    else:
+        parser_bytes = raw_bytes
+
+    root = _parse_strict_xml_from_bytes(parser_bytes, context=f"{path} ({locked_path})")
     if root.tag != "quran":
         raise ValueError(f"Expected root tag 'quran', got {root.tag!r}")
     if root.attrib:

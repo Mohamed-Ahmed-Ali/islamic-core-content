@@ -1,0 +1,15 @@
+<!--
+
+# --------------------------------------------------------------------
+#
+#  Quran Translation
+#  Name: Pickthall
+#  Translator: Mohammed Marmaduke William Pickthall
+#  Language: English
+#  ID: en.pickthall
+#  Last Update: September 4, 2010
+#  Source: Tanzil.net
+#
+# --------------------------------------------------------------------
+	
+-->
