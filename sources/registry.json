@@ -1,0 +1,118 @@
+{
+  "audio/adhan/abdul-basit-abdul-samad-2.mp3": {
+    "packIds": [
+      "audio-adhan-core"
+    ],
+    "sourceUrl": "https://www.assabile.com/download/adhan/140",
+    "sourceVersion": "Assabile recording 140"
+  },
+  "audio/adhan/abdul-basit-abdul-samad.mp3": {
+    "packIds": [
+      "audio-adhan-core"
+    ],
+    "sourceUrl": "https://www.assabile.com/download/adhan/138",
+    "sourceVersion": "Assabile recording 138"
+  },
+  "audio/adhan/abul-ainain-shuaisha.mp3": {
+    "packIds": [
+      "audio-adhan-core"
+    ],
+    "sourceUrl": "https://www.assabile.com/download/adhan/145",
+    "sourceVersion": "Assabile recording 145"
+  },
+  "audio/adhan/mahmoud-khalil-al-hussary.mp3": {
+    "packIds": [
+      "audio-adhan-core"
+    ],
+    "sourceUrl": "https://www.assabile.com/download/adhan/142",
+    "sourceVersion": "Assabile recording 142"
+  },
+  "audio/adhan/mohamed-refaat.mp3": {
+    "packIds": [
+      "audio-adhan-core"
+    ],
+    "sourceUrl": "https://www.assabile.com/download/adhan/149",
+    "sourceVersion": "Assabile recording 149"
+  },
+  "audio/adhan/mustafa-ismail.mp3": {
+    "packIds": [
+      "audio-adhan-core"
+    ],
+    "sourceUrl": "https://www.assabile.com/download/adhan/141",
+    "sourceVersion": "Assabile recording 141"
+  },
+  "corpus/quranic-corpus-morphology-0.4.zip": {
+    "packIds": [
+      "quran-morphology"
+    ],
+    "sourceUrl": "https://corpus.quran.com/download/",
+    "sourceVersion": "0.4"
+  },
+  "tanzil/ar.jalalayn.xml": {
+    "packIds": [
+      "quran-tafsir-ar-jalalayn"
+    ],
+    "sourceUrl": "https://tanzil.net/trans/ar.jalalayn?type=xml",
+    "sourceVersion": "2010-12-01"
+  },
+  "tanzil/en.pickthall.xml": {
+    "packIds": [
+      "quran-tr-en-pickthall"
+    ],
+    "sourceUrl": "https://tanzil.net/trans/en.pickthall?type=xml",
+    "sourceVersion": "2010-09-04"
+  },
+  "tanzil/quran-data-Tanzil.xml": {
+    "packIds": [
+      "quran-core",
+      "quran-morphology",
+      "quran-scripts-extended",
+      "quran-tafsir-ar-jalalayn",
+      "quran-tr-en-pickthall"
+    ],
+    "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+    "sourceVersion": "1.0"
+  },
+  "tanzil/quran-simple-clean.xml": {
+    "packIds": [
+      "quran-core"
+    ],
+    "sourceUrl": "https://tanzil.net/pub/download/index.php?quranType=simple-clean&outType=xml&marks=true&sajdah=true&rub=true&alef=true&tatweel=true&agree=true&laa=true&stanween=true",
+    "sourceVersion": "1.1"
+  },
+  "tanzil/quran-simple-min.xml": {
+    "packIds": [
+      "quran-scripts-extended"
+    ],
+    "sourceUrl": "https://tanzil.net/pub/download/index.php?quranType=simple-min&outType=xml&marks=true&sajdah=true&rub=true&alef=true&tatweel=true&agree=true&laa=true&stanween=true",
+    "sourceVersion": "1.1"
+  },
+  "tanzil/quran-simple-plain.xml": {
+    "packIds": [
+      "quran-scripts-extended"
+    ],
+    "sourceUrl": "https://tanzil.net/pub/download/index.php?quranType=simple-plain&outType=xml&marks=true&sajdah=true&rub=true&alef=true&tatweel=true&agree=true&laa=true&stanween=true",
+    "sourceVersion": "1.1"
+  },
+  "tanzil/quran-simple.xml": {
+    "packIds": [
+      "quran-scripts-extended"
+    ],
+    "sourceUrl": "https://tanzil.net/pub/download/index.php?quranType=simple&outType=xml&marks=true&sajdah=true&rub=true&alef=true&tatweel=true&agree=true&laa=true&stanween=true",
+    "sourceVersion": "1.1"
+  },
+  "tanzil/quran-uthmani-min.xml": {
+    "packIds": [
+      "quran-scripts-extended"
+    ],
+    "sourceUrl": "https://tanzil.net/pub/download/index.php?quranType=uthmani-min&outType=xml&marks=true&sajdah=true&rub=true&alef=true&tatweel=true&agree=true&laa=true&stanween=true",
+    "sourceVersion": "1.1"
+  },
+  "tanzil/quran-uthmani.xml": {
+    "packIds": [
+      "quran-core"
+    ],
+    "sourceUrl": "https://tanzil.net/pub/download/index.php?quranType=uthmani&outType=xml&marks=true&sajdah=true&rub=true&alef=true&tatweel=true&agree=true&laa=true&stanween=true",
+    "sourceVersion": "1.1"
+  }
+}
