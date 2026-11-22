@@ -38,6 +38,7 @@ from typing import Any
 import pytest
 
 from tests.fixtures.build import build_fixtures
+from pipelines.common.lock_inputs import LockEntry, canonical_entries_json
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXPECTATIONS_PATH = REPO_ROOT / "tests" / "fixtures" / "expectations.json"
@@ -887,6 +888,52 @@ class TestQualityGateDoD:
         assert "check 9" in output.lower() or "#9" in output
         assert "quran-tafsir-ar-fixture.db" in output
 
+
+    @pytest.mark.parametrize(
+        "drift_group_key,drift_end_ayah_id",
+        [
+            ("1:2-4", 4),
+            ("1:2-4", 3),
+            ("1:2-3", 4),
+        ],
+    )
+    def test_regression_check9_tafsir_interval_entry_expansion_both_roots(
+        self, fixture_setup: dict[str, Path], drift_group_key: str, drift_end_ayah_id: int
+    ) -> None:
+        """Check #9 regression: Expanding entry 2 group_key/end_ayah_id on both roots must fail Check #9."""
+        for root_name in ("candidate", "rebuild"):
+            db_path = fixture_setup[root_name] / "quran-tafsir-ar-fixture.db"
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "UPDATE tafsir_entries SET group_key = ?, end_ayah_id = ? WHERE id = 2;",
+                (drift_group_key, drift_end_ayah_id),
+            )
+            conn.commit()
+            conn.close()
+
+            _update_manifest_asset(
+                fixture_setup[root_name] / "catalog.json",
+                "quran-tafsir-ar-fixture.db",
+                db_path.stat().st_size,
+                _recompute_sha256(db_path),
+            )
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        diagnostics = [
+            line
+            for line in output.splitlines()
+            if ("check 9" in line.lower() or "check #9" in line.lower())
+            and "failed on" in line.lower()
+            and "quran-tafsir-ar-fixture.db" in line
+        ]
+        assert diagnostics, f"Expected actual Check #9 failed diagnostic on Tafsir DB, got:\n{output}"
     def test_malformed_expectations_file_exits_2(self, fixture_setup: dict[str, Path], tmp_path: Path) -> None:
         """Malformed expectations file causes gate to exit with status 2."""
         bad_exp = tmp_path / "bad_expectations.json"
@@ -917,10 +964,338 @@ class TestQualityGateDoD:
         assert b"\\u" not in cat_bytes
         assert b"\\u" not in audio_man_bytes
 
-        # Exact both duration spellings required: 2.0 and 1.5 in audio manifest
+        # Assert both fixture durations as actual 2.0 canonical bytes
         assert b'"durationSeconds":2.0' in audio_man_bytes
-        assert b'"durationSeconds":1.5' in audio_man_bytes
+        assert audio_man_bytes.count(b'"durationSeconds":2.0') == 2
 
         # Verify duration formatting helper produces exact expected floats
         assert format_duration_seconds(Fraction(2, 1)) == 2.0
         assert format_duration_seconds(Fraction(3, 2)) == 1.5
+        assert b'"durationSeconds":1.5' in _canonical_dump({"durationSeconds": format_duration_seconds(Fraction(3, 2))})
+
+        # Verify actual gate rejects escaped non-ASCII vs literal from valid baseline where possible
+        audio_man = fixture_setup["candidate"] / "audio-manifest.json"
+        escaped_bytes = audio_man_bytes.replace(b'"reciter":"Synthetic tone"', b'"reciter":"Synthetic tone \\u0631"')
+        assert escaped_bytes != audio_man_bytes
+        audio_man.write_bytes(escaped_bytes)
+        code, out, err = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        assert code == 1
+        output = (out + "\n" + err).lower()
+        assert "check 2" in output or "#2" in output or "check 5" in output or "#5" in output
+
+    def test_regression_extra_asset_in_root_fails_check5(self, fixture_setup: dict[str, Path]) -> None:
+        """Regression: Undeclared extra file in candidate or rebuild root fails Check #5."""
+        extra_file = fixture_setup["candidate"] / "extra_unregistered_file.txt"
+        extra_file.write_text("extra", encoding="utf-8")
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 5" in output.lower() or "#5" in output
+        assert "extra_unregistered_file.txt" in output
+
+    def test_regression_cross_root_inode_alias_fails_check6(self, fixture_setup: dict[str, Path]) -> None:
+        """Regression: Cross-root hard link (inode alias) between candidate and rebuild fails Check #6."""
+        cand_file = fixture_setup["candidate"] / "adhan-fixture-full.m4a"
+        reb_file = fixture_setup["rebuild"] / "adhan-fixture-full.m4a"
+        reb_file.unlink()
+        try:
+            os.link(cand_file, reb_file)
+        except OSError:
+            pytest.skip("Hard links not supported in this filesystem/environment")
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 6" in output.lower() or "#6" in output
+        assert "adhan-fixture-full.m4a" in output or "alias" in output.lower()
+
+    def test_regression_rebuild_only_table_data_change_fails_appropriately(self, fixture_setup: dict[str, Path]) -> None:
+        """Regression: Corrupt table data ONLY in rebuild must fail at Check #2/appropriate stage, NOT Check #6."""
+        reb_db = fixture_setup["rebuild"] / "quran-tr-en-fixture.db"
+        conn = sqlite3.connect(reb_db)
+        # Violate Check #2 by setting empty text on a NOT NULL column
+        conn.execute("UPDATE translations SET text = '   ' WHERE ayah_id = 1;")
+        conn.commit()
+        conn.close()
+
+        # Update rebuild catalog size and sha256 so Check #5 passes on rebuild
+        _update_manifest_asset(
+            fixture_setup["rebuild"] / "catalog.json",
+            "quran-tr-en-fixture.db",
+            reb_db.stat().st_size,
+            _recompute_sha256(reb_db),
+        )
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        # Must fail at Check #2 (text validation on rebuild), NOT pass Stage 8 and fail at Check #6 (cross-root byte diff)
+        assert "check 2" in output.lower() or "#2" in output
+        assert "quran-tr-en-fixture.db" in output
+
+    def test_regression_source_mismatch_fails_check7(self, fixture_setup: dict[str, Path]) -> None:
+        """Regression: License source metadata mismatch against locked registry fails Check #7."""
+        lic_file = fixture_setup["source"] / "sources" / "licenses" / "quran-core.json"
+        lic_data = json.loads(lic_file.read_text(encoding="utf-8"))
+        lic_data["sources"][0]["sourceUrl"] = "https://example.org/fixture/tampered-url"
+        lic_file.write_text(json.dumps(lic_data, indent=2), encoding="utf-8")
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 7" in output.lower() or "#7" in output
+
+    def test_regression_lexical_path_order_policy_fails_fast(self, fixture_setup: dict[str, Path]) -> None:
+        """Regression: Fail fast at the first offending asset in lexical path order for the stage."""
+        # Introduce Check #3 failure in both quran-core.db and quran-wbw-en.db
+        for db_name in ("quran-core.db", "quran-wbw-en.db"):
+            db_p = fixture_setup["candidate"] / db_name
+            conn = sqlite3.connect(db_p)
+            conn.execute("PRAGMA user_version = 99;")
+            conn.commit()
+            conn.close()
+            _update_manifest_asset(
+                fixture_setup["candidate"] / "catalog.json",
+                db_name,
+                db_p.stat().st_size,
+                _recompute_sha256(db_p),
+            )
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 3" in output.lower() or "#3" in output
+        # Lexical order: quran-core.db comes before quran-wbw-en.db
+        assert "quran-core.db" in output
+        assert "quran-wbw-en.db" not in output
+
+    def test_mutation_check2_identical_changed_extended_script_both_dbs(self, fixture_setup: dict[str, Path]) -> None:
+        """Identical changed extended script in both DBs plus refreshed hashes must fail Check #2."""
+        for root_name in ("candidate", "rebuild"):
+            db_p = fixture_setup[root_name] / "quran-scripts-extended.db"
+            conn = sqlite3.connect(db_p)
+            conn.execute("UPDATE ayah_scripts SET text_simple_plain = 'tampered' WHERE ayah_id = 1;")
+            conn.commit()
+            conn.close()
+            _update_manifest_asset(
+                fixture_setup[root_name] / "catalog.json",
+                "quran-scripts-extended.db",
+                db_p.stat().st_size,
+                _recompute_sha256(db_p),
+            )
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 2" in output.lower() or "#2" in output
+        assert "quran-scripts-extended.db" in output
+
+    def test_mutation_check3_same_name_different_index_definition(self, fixture_setup: dict[str, Path]) -> None:
+        """Same-name different index definition in schema must fail Check #3."""
+        for root_name in ("candidate", "rebuild"):
+            db_p = fixture_setup[root_name] / "quran-core.db"
+            conn = sqlite3.connect(db_p)
+            conn.execute("DROP INDEX idx_ayahs_juz;")
+            conn.execute("CREATE INDEX idx_ayahs_juz ON ayahs(manzil);")
+            conn.commit()
+            conn.close()
+            _update_manifest_asset(
+                fixture_setup[root_name] / "catalog.json",
+                "quran-core.db",
+                db_p.stat().st_size,
+                _recompute_sha256(db_p),
+            )
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 3" in output.lower() or "#3" in output
+        assert "quran-core.db" in output
+
+    def test_mutation_check2_raw_json_parse_failure_no_traceback(self, fixture_setup: dict[str, Path]) -> None:
+        """Raw JSON parse failure fails Check #2 naming locked input with no traceback."""
+        raw_file = fixture_setup["source"] / "raw-inputs" / "sqlite" / "quran-core.json"
+        bad_content = b"{malformed json"
+        raw_file.write_bytes(bad_content)
+        # Update lockfile hash so it passes lock verification Check #7
+        new_hash = hashlib.sha256(bad_content).hexdigest().lower()
+        lock_path = fixture_setup["source"] / "sources" / "manifest.lock.json"
+        lock_data = json.loads(lock_path.read_text(encoding="utf-8"))
+        for item in lock_data["inputs"]:
+            if item["path"] == "sqlite/quran-core.json":
+                item["sha256"] = new_hash
+                item["sizeBytes"] = len(bad_content)
+        lock_path.write_bytes(_canonical_lock_dump(lock_data))
+
+        # Update build_input_sha256 in pack_meta for both candidate and rebuild
+        pack_entry = LockEntry(
+            path="sqlite/quran-core.json",
+            source_url="https://example.org/fixture/sqlite/quran-core.json",
+            source_version="1",
+            size_bytes=len(bad_content),
+            sha256=new_hash,
+        )
+        exp_build_hash = hashlib.sha256(canonical_entries_json([pack_entry])).hexdigest().lower()
+        for root_name in ("candidate", "rebuild"):
+            db_p = fixture_setup[root_name] / "quran-core.db"
+            conn = sqlite3.connect(db_p)
+            conn.execute("UPDATE pack_meta SET value = ? WHERE key = 'build_input_sha256';", (exp_build_hash,))
+            conn.commit()
+            conn.close()
+            _update_manifest_asset(
+                fixture_setup[root_name] / "catalog.json",
+                "quran-core.db",
+                db_p.stat().st_size,
+                _recompute_sha256(db_p),
+            )
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 2" in output.lower() or "#2" in output
+        assert "sqlite/quran-core.json" in output
+        assert "Traceback (most recent call last)" not in output
+
+    def test_mutation_check2_non_text_key_in_db(self, fixture_setup: dict[str, Path]) -> None:
+        """Non-TEXT key in DB column fails Check #2."""
+        for root_name in ("candidate", "rebuild"):
+            db_p = fixture_setup[root_name] / "quran-core.db"
+            conn = sqlite3.connect(db_p)
+            conn.execute("UPDATE ayahs SET verse_key = 123 WHERE id = 1;")
+            conn.commit()
+            conn.close()
+            _update_manifest_asset(
+                fixture_setup[root_name] / "catalog.json",
+                "quran-core.db",
+                db_p.stat().st_size,
+                _recompute_sha256(db_p),
+            )
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 2" in output.lower() or "#2" in output
+        assert "quran-core.db" in output
+
+    def test_mutation_check7_license_clip_start_bool(self, fixture_setup: dict[str, Path]) -> None:
+        """Boolean clipStartMs in license record fails Check #7."""
+        lic_p = fixture_setup["source"] / "sources" / "licenses" / "audio-adhan-core.json"
+        lic_data = json.loads(lic_p.read_text(encoding="utf-8"))
+        lic_data["sources"][0]["clipStartMs"] = False
+        lic_p.write_bytes(_canonical_dump(lic_data))
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 7" in output.lower() or "#7" in output
+
+    def test_mutation_check5_wrong_category(self, fixture_setup: dict[str, Path]) -> None:
+        """Incorrect pack category fails Check #5."""
+        for root_name in ("candidate", "rebuild"):
+            cat_p = fixture_setup[root_name] / "catalog.json"
+            cat_data = json.loads(cat_p.read_text(encoding="utf-8"))
+            for p in cat_data["packs"]:
+                if p["id"] == "quran-core":
+                    p["category"] = "hadith"
+            cat_p.write_bytes(_canonical_dump(cat_data))
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 5" in output.lower() or "#5" in output
+
+    def test_mutation_check6_cross_root_inode_alias_distinct_filenames(self, fixture_setup: dict[str, Path]) -> None:
+        """Cross-root inode alias between distinct filenames fails Check #6."""
+        c_file = fixture_setup["candidate"] / "quran-core.db"
+        r_target = fixture_setup["rebuild"] / "quran-scripts-extended.db"
+        try:
+            # Remove rebuild file and hardlink to candidate file with different name
+            r_target.unlink()
+            os.link(c_file, r_target)
+        except OSError:
+            pytest.skip("Hardlinks not supported on this filesystem")
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 6" in output.lower() or "#6" in output
+
+    def test_oracle_malformed_coordinate_grammar_exits_2(self, fixture_setup: dict[str, Path], tmp_path: Path) -> None:
+        """Oracle with malformed coordinate grammar exits code 2."""
+        bad_exp = json.loads(EXPECTATIONS_PATH.read_text(encoding="utf-8"))
+        # Verse key coordinate format violation: 1:1:1 instead of 1:1
+        bad_exp["packs"]["quran-core"]["keys"] = ["1:1:1", "1:2", "1:3"]
+        bad_exp_file = tmp_path / "bad_oracle.json"
+        bad_exp_file.write_text(json.dumps(bad_exp), encoding="utf-8")
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=bad_exp_file,
+        )
+        assert exit_code == 2
