@@ -1,0 +1,15 @@
+<!--
+
+# --------------------------------------------------------------------
+#
+#  Quran Translation
+#  Name: تفسير الجلالين
+#  Translator: Jalal ad-Din al-Mahalli and Jalal ad-Din as-Suyuti
+#  Language: Arabic
+#  ID: ar.jalalayn
+#  Last Update: December 1, 2010
+#  Source: Tanzil.net
+#
+# --------------------------------------------------------------------
+	
+-->

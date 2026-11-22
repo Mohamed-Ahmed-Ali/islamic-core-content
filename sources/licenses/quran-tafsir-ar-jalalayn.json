@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-Tanzil-Noncommercial-Edition",
+  "packId": "quran-tafsir-ar-jalalayn",
+  "primaryPath": "tanzil/ar.jalalayn.xml",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/), Jalal ad-Din al-Mahalli and Jalal ad-Din as-Suyuti",
+      "name": "Tanzil Jalalayn Arabic Tafsir",
+      "notice": "<!--\r\n\n# --------------------------------------------------------------------\n#\n#  Quran Translation\n#  Name: \u062a\u0641\u0633\u064a\u0631 \u0627\u0644\u062c\u0644\u0627\u0644\u064a\u0646\n#  Translator: Jalal ad-Din al-Mahalli and Jalal ad-Din as-Suyuti\n#  Language: Arabic\n#  ID: ar.jalalayn\n#  Last Update: December 1, 2010\n#  Source: Tanzil.net\n#\n# --------------------------------------------------------------------\n\t\r\n-->",
+      "path": "tanzil/ar.jalalayn.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/trans/",
+        "sources/licenses/evidence/tanzil/ar.jalalayn.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/trans/ar.jalalayn?type=xml",
+      "sourceVersion": "2010-12-01"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}
