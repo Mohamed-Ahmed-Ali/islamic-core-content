@@ -1,0 +1,36 @@
+{
+  "licenseSpdx": "GPL-3.0",
+  "packId": "quran-morphology",
+  "primaryPath": "corpus/quranic-corpus-morphology-0.4.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Kais Dukes / Quranic Arabic Corpus (https://corpus.quran.com/); Tanzil Quran Text (Uthmani, version 1.0.2) Copyright (C) 2008-2009 Tanzil.info (https://tanzil.net/)",
+      "name": "Quranic Arabic Corpus",
+      "notice": "See sources/licenses/evidence/quran-morphology/CORPUS-NOTICE.txt, sources/licenses/evidence/quran-morphology/TANZIL-NOTICE.txt, and https://corpus.quran.com/license.jsp",
+      "path": "corpus/quranic-corpus-morphology-0.4.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://corpus.quran.com/license.jsp",
+        "sources/licenses/evidence/quran-morphology/CORPUS-NOTICE.txt",
+        "sources/licenses/evidence/quran-morphology/TANZIL-NOTICE.txt",
+        "sources/licenses/evidence/quran-morphology/GPL-3.0.txt"
+      ],
+      "sourceUrl": "https://corpus.quran.com/download/",
+      "sourceVersion": "0.4"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}
