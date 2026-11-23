@@ -1,0 +1,87 @@
+{
+  "licenseSpdx": "LicenseRef-Adhan-Recordings",
+  "packId": "audio-adhan-core",
+  "primaryPath": "audio/adhan/abdul-basit-abdul-samad.mp3",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "",
+      "clipStartMs": 0,
+      "name": "Adhan — Abdul Basit Abdul Samad (Fajr)",
+      "notice": "",
+      "path": "audio/adhan/abdul-basit-abdul-samad-2.mp3",
+      "permittedUses": [],
+      "reciter": "Abdul Basit Abdul Samad",
+      "rightsEvidence": [],
+      "slug": "abdul-basit-abdul-samad-2",
+      "sourceUrl": "https://www.assabile.com/download/adhan/140",
+      "sourceVersion": "Assabile recording 140"
+    },
+    {
+      "attribution": "",
+      "clipStartMs": 0,
+      "name": "Adhan — Abdul Basit Abdul Samad",
+      "notice": "",
+      "path": "audio/adhan/abdul-basit-abdul-samad.mp3",
+      "permittedUses": [],
+      "reciter": "Abdul Basit Abdul Samad",
+      "rightsEvidence": [],
+      "slug": "abdul-basit-abdul-samad",
+      "sourceUrl": "https://www.assabile.com/download/adhan/138",
+      "sourceVersion": "Assabile recording 138"
+    },
+    {
+      "attribution": "",
+      "clipStartMs": 0,
+      "name": "Adhan — Abul Ainain Shu’aisha",
+      "notice": "",
+      "path": "audio/adhan/abul-ainain-shuaisha.mp3",
+      "permittedUses": [],
+      "reciter": "Abul Ainain Shu’aisha",
+      "rightsEvidence": [],
+      "slug": "abul-ainain-shuaisha",
+      "sourceUrl": "https://www.assabile.com/download/adhan/145",
+      "sourceVersion": "Assabile recording 145"
+    },
+    {
+      "attribution": "",
+      "clipStartMs": 0,
+      "name": "Adhan — Mahmoud Khalil Al-Hussary",
+      "notice": "",
+      "path": "audio/adhan/mahmoud-khalil-al-hussary.mp3",
+      "permittedUses": [],
+      "reciter": "Mahmoud Khalil Al-Hussary",
+      "rightsEvidence": [],
+      "slug": "mahmoud-khalil-al-hussary",
+      "sourceUrl": "https://www.assabile.com/download/adhan/142",
+      "sourceVersion": "Assabile recording 142"
+    },
+    {
+      "attribution": "",
+      "clipStartMs": 0,
+      "name": "Adhan — Mohamed Refaat",
+      "notice": "",
+      "path": "audio/adhan/mohamed-refaat.mp3",
+      "permittedUses": [],
+      "reciter": "Mohamed Refaat",
+      "rightsEvidence": [],
+      "slug": "mohamed-refaat",
+      "sourceUrl": "https://www.assabile.com/download/adhan/149",
+      "sourceVersion": "Assabile recording 149"
+    },
+    {
+      "attribution": "",
+      "clipStartMs": 0,
+      "name": "Adhan — Mustafa Ismail",
+      "notice": "",
+      "path": "audio/adhan/mustafa-ismail.mp3",
+      "permittedUses": [],
+      "reciter": "Mustafa Ismail",
+      "rightsEvidence": [],
+      "slug": "mustafa-ismail",
+      "sourceUrl": "https://www.assabile.com/download/adhan/141",
+      "sourceVersion": "Assabile recording 141"
+    }
+  ],
+  "status": "pending"
+}
