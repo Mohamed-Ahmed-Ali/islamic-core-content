@@ -1,0 +1,299 @@
+name: release-packs
+
+on:
+  push:
+    tags:
+      - 'content-v0.1.0'
+
+concurrency: release-packs-${{ github.ref_name }}
+
+permissions:
+  contents: read
+
+jobs:
+  content-release:
+    name: Build, verify, and publish content release
+    runs-on: ubuntu-24.04
+    environment: content-release
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Verify trusted runner context
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "${REF_NAME}" != "content-v0.1.0" ]; then
+            echo "Unexpected tag name: ${REF_NAME}" >&2
+            exit 1
+          fi
+          DESC_REPO="$(python3 -c 'import json; print(json.load(open("sources/release-v0.1.0.json", encoding="utf-8"))["repository"])')"
+          if [ "${REPO_NAME}" != "${DESC_REPO}" ]; then
+            echo "Repository mismatch: runner has '\''${REPO_NAME}'\'', descriptor has '\''${DESC_REPO}'\''" >&2
+            exit 1
+          fi
+
+      - name: Build pinned toolchain image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 -f pipelines/toolchain/Dockerfile -t quality-gate-toolchain .
+
+      - name: Stage canonical source tree on host
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="${RUNNER_TEMP}/release-work"
+          rm -rf "${WORK}"
+          mkdir -p "${WORK}/source" "${WORK}/candidate" "${WORK}/rebuild"
+          git -c core.autocrlf=false archive --format=tar HEAD | tar -xf - -C "${WORK}/source"
+
+      - name: Acquire external sources
+        shell: bash
+        env:
+          CONTENT_AUTHORIZED_INPUT_BUNDLE_URL: ${{ secrets.CONTENT_AUTHORIZED_INPUT_BUNDLE_URL }}
+        run: |
+          set -euo pipefail
+          WORK="${RUNNER_TEMP}/release-work"
+          docker run --rm \
+            --mount "type=bind,src=${WORK}/source,dst=/source" \
+            -w /source \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e CONTENT_AUTHORIZED_INPUT_BUNDLE_URL="${CONTENT_AUTHORIZED_INPUT_BUNDLE_URL:-}" \
+            quality-gate-toolchain \
+            python -m pipelines.release.release_packs acquire --sources-root /source
+
+      - name: Strict clearance guard before builds
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="${RUNNER_TEMP}/release-work"
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev \
+            --mount "type=bind,src=${WORK}/source,dst=/source,readonly" \
+            -w /source \
+            -e HOME=/tmp \
+            -e TMPDIR=/tmp \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            quality-gate-toolchain \
+            python -m pipelines.release.release_packs require-clearance --sources-root /source
+      - name: Deterministically build candidate and rebuild in offline container
+        shell: bash
+        run: |
+          set -euo pipefail
+          WORK="${RUNNER_TEMP}/release-work"
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev \
+            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
+            --mount "type=bind,src=${WORK}/source,dst=/source,readonly" \
+            --mount "type=bind,src=${WORK}/candidate,dst=/candidate" \
+            --mount "type=bind,src=${WORK}/rebuild,dst=/rebuild" \
+            -w /source \
+            -e HOME=/tmp \
+            -e TMPDIR=/tmp \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            quality-gate-toolchain \
+            bash -lc '
+              set -euo pipefail
+              for OUT in /candidate /rebuild; do
+                for mod in build_quran_core build_quran_scripts_extended build_quran_translation \
+                           build_quran_tafsir build_quran_morphology build_audio_adhan; do
+                  python -m "pipelines.builders.$mod" --sources-root /source --output-dir "$OUT"
+                done
+                python -m pipelines.release.release_packs assemble-companions --sources-root /source --asset-root "$OUT"
+                python -m pipelines.release.generate_catalog --sources-root /source --asset-root "$OUT"
+
+                cmp "$OUT/catalog.json" /repo/catalog/catalog.json
+                cmp "$OUT/audio-manifest.json" /repo/catalog/audio-manifest.json
+              done
+
+              python -m pipelines.validators.quality_gate --profile v0.1.0 --candidate /candidate --rebuild /rebuild --sources-root /source
+            '
+
+      - name: Create draft release and attach validated assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ github.ref_name }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          WORK="${RUNNER_TEMP}/release-work"
+
+          # Fail on gh list error or preexisting same-tag draft/release using gh api --paginate --slurp
+          RELEASES_RAW="$(gh api --paginate --slurp "repos/${REPO_NAME}/releases")"
+          PREEXISTING="$(echo "${RELEASES_RAW}" | jq --arg tag "${TAG_NAME}" '[flatten | .[] | select(.tag_name == $tag)] | length')"
+          if [ "${PREEXISTING}" -ne 0 ]; then
+            echo "Preexisting release or draft for tag ${TAG_NAME} found; refusing to overwrite" >&2
+            exit 1
+          fi
+
+          NOTES_FILE="$(mktemp)"
+          NOTES_FILE="${NOTES_FILE}" python3 -c '
+          import json, glob, os
+          desc = json.load(open("sources/release-v0.1.0.json", encoding="utf-8"))
+          repo = desc["repository"]
+          tag = os.environ["TAG_NAME"]
+          lines = [
+              f"## Islamic Core Content Release {tag}",
+              "",
+              "### Verified Source Companions & Licenses",
+          ]
+          for c in desc.get("companions", []):
+              name, digest = c["filename"], c["sha256"]
+              lines.append(f"- Companion `{name}` SHA-256: `{digest}`")
+          for lf in sorted(glob.glob("sources/licenses/*.json")):
+              lf_rel = lf.replace(os.sep, "/")
+              pack = os.path.splitext(os.path.basename(lf))[0]
+              lines.append(f"- `{pack}`: [{lf_rel}](https://github.com/{repo}/blob/{tag}/{lf_rel})")
+          lines.append("")
+          lines.append("All assets deterministically built, cross-rebuilt, and verified by quality-gate.")
+          open(os.environ["NOTES_FILE"], "w", encoding="utf-8").write("\n".join(lines) + "\n")
+          '
+
+          ATTACHMENTS=()
+          while IFS= read -r f; do
+            ATTACHMENTS+=("$f")
+          done < <(find "${WORK}/candidate" -maxdepth 1 -mindepth 1 -type f | sort)
+
+          if [ "${#ATTACHMENTS[@]}" -ne 20 ]; then
+            echo "Expected exactly 20 asset files to attach, got ${#ATTACHMENTS[@]}" >&2
+            exit 1
+          fi
+
+          gh release create "${TAG_NAME}" \
+            --repo "${REPO_NAME}" \
+            --verify-tag \
+            --draft \
+            --title "Islamic Core Content ${TAG_NAME}" \
+            --notes-file "${NOTES_FILE}" \
+            "${ATTACHMENTS[@]}"
+
+          # Discover unique draft numeric ID
+          DRAFT_RELEASES_RAW="$(gh api --paginate --slurp "repos/${REPO_NAME}/releases")"
+          DRAFTS="$(echo "${DRAFT_RELEASES_RAW}" | jq --arg tag "${TAG_NAME}" '[flatten | .[] | select(.tag_name == $tag and .draft == true)]')"
+          DRAFT_COUNT="$(echo "${DRAFTS}" | jq 'length')"
+          if [ "${DRAFT_COUNT}" -ne 1 ]; then
+            echo "Expected exactly 1 draft release for tag ${TAG_NAME}, found ${DRAFT_COUNT}" >&2
+            exit 1
+          fi
+          DRAFT_ID="$(echo "${DRAFTS}" | jq -r '.[0].id')"
+          if [ -z "${DRAFT_ID}" ] || [ "${DRAFT_ID}" = "null" ]; then
+            echo "Failed to discover valid numeric draft ID" >&2
+            exit 1
+          fi
+          echo "DRAFT_ID=${DRAFT_ID}" >> "${GITHUB_ENV}"
+
+      - name: Verify draft release download by authenticated asset IDs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          WORK="${RUNNER_TEMP}/release-work"
+          DRAFT_DIR="${WORK}/draft-download"
+          rm -rf "${DRAFT_DIR}"
+          mkdir -p "${DRAFT_DIR}"
+
+          # Paginate and fetch asset IDs and names from releases/{id}/assets
+          ASSETS_RAW="$(gh api --paginate --slurp "repos/${REPO_NAME}/releases/${DRAFT_ID}/assets")"
+          ASSETS_FLAT="$(echo "${ASSETS_RAW}" | jq 'flatten')"
+
+          EXPECTED_NAMES="$(find "${WORK}/candidate" -maxdepth 1 -mindepth 1 -type f -printf '%f\n' | sort)"
+          ACTUAL_NAMES="$(echo "${ASSETS_FLAT}" | jq -r '.[].name' | sort)"
+
+          if [ "${EXPECTED_NAMES}" != "${ACTUAL_NAMES}" ]; then
+            echo "Mismatch between candidate filenames and draft release asset names" >&2
+            exit 1
+          fi
+
+          INVALID_IDS="$(echo "${ASSETS_FLAT}" | jq '[.[] | select((.id | type != "number") or (.id <= 0))] | length')"
+          if [ "${INVALID_IDS}" -ne 0 ]; then
+            echo "Found assets with non-numeric or non-positive IDs" >&2
+            exit 1
+          fi
+
+          # Download each asset by ID into fresh dir
+          echo "${ASSETS_FLAT}" | jq -c '.[]' | while read -r asset; do
+            ID="$(echo "${asset}" | jq -r '.id')"
+            NAME="$(echo "${asset}" | jq -r '.name')"
+            gh api -H "Accept: application/octet-stream" "repos/${REPO_NAME}/releases/assets/${ID}" > "${DRAFT_DIR}/${NAME}"
+          done
+
+          # Bind /repo read-only and -w /repo in pinned verifier
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev \
+            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
+            --mount "type=bind,src=${WORK}/candidate,dst=/expected,readonly" \
+            --mount "type=bind,src=${DRAFT_DIR},dst=/download,readonly" \
+            -w /repo \
+            -e HOME=/tmp \
+            -e TMPDIR=/tmp \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            quality-gate-toolchain \
+            python -m pipelines.release.release_packs verify-download --expected-root /expected --asset-root /download
+
+      - name: Publish draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api -X PATCH "repos/${REPO_NAME}/releases/${DRAFT_ID}" -F draft=false
+
+      - name: Verify public unauthenticated release download
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          WORK="${RUNNER_TEMP}/release-work"
+          PUBLIC_DIR="${WORK}/public-download"
+          rm -rf "${PUBLIC_DIR}"
+          mkdir -p "${PUBLIC_DIR}"
+
+          # Unauthenticated public API inventory check
+          PUBLIC_RELEASE="$(curl -sSLf "https://api.github.com/repos/${REPO_NAME}/releases/tags/${TAG_NAME}")"
+          PUBLIC_NAMES="$(echo "${PUBLIC_RELEASE}" | jq -r '.assets[].name' | sort)"
+          EXPECTED_NAMES="$(find "${WORK}/candidate" -maxdepth 1 -mindepth 1 -type f -printf '%f\n' | sort)"
+
+          if [ "${EXPECTED_NAMES}" != "${PUBLIC_NAMES}" ]; then
+            echo "Public release asset names do not match expected candidate files" >&2
+            exit 1
+          fi
+
+          # HTTPS bytes verification without authentication
+          while IFS= read -r fn; do
+            curl -sSLf "https://github.com/${REPO_NAME}/releases/download/${TAG_NAME}/${fn}" -o "${PUBLIC_DIR}/${fn}"
+          done < <(echo "${EXPECTED_NAMES}")
+
+          # Bind /repo read-only and -w /repo in pinned verifier
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,nosuid,nodev \
+            --mount "type=bind,src=${GITHUB_WORKSPACE},dst=/repo,readonly" \
+            --mount "type=bind,src=${WORK}/candidate,dst=/expected,readonly" \
+            --mount "type=bind,src=${PUBLIC_DIR},dst=/download,readonly" \
+            -w /repo \
+            -e HOME=/tmp \
+            -e TMPDIR=/tmp \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            quality-gate-toolchain \
+            python -m pipelines.release.release_packs verify-download --expected-root /expected --asset-root /download

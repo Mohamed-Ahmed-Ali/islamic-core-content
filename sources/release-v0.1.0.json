@@ -1,0 +1,15 @@
+{
+  "bundlePaths": [
+    "corpus/quranic-corpus-morphology-0.4.zip"
+  ],
+  "companions": [
+    {
+      "filename": "quran-morphology-source.zip",
+      "sha256": "25cfa31be6062e651c9df9eb1e49e729f3d104403fcf3202b034d15686b3454c",
+      "sizeBytes": 1339290,
+      "sourcePath": null
+    }
+  ],
+  "generatedAt": "2026-11-23T13:31:00Z",
+  "repository": "Mohamed-Ahmed-Ali/islamic-core-content"
+}

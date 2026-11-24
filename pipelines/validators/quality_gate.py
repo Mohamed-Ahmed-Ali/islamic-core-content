@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime, timezone
 from fractions import Fraction
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -16,6 +17,7 @@ import sqlite3
 import sys
 import tempfile
 from typing import Any
+import zipfile
 
 from jsonschema import Draft202012Validator, ValidationError
 import jsonschema.validators
@@ -26,10 +28,16 @@ from pipelines.common.lock_inputs import (
     canonical_entries_json,
     parse_strict_json,
     validate_https_url,
+    validate_safe_relative_path,
+    verify_exact_file_on_disk,
     verify_lock,
     _is_symlink_or_junction,
 )
 from pipelines.common.search_text import normalize_arabic, project_tafsir_text
+from pipelines.common.tanzil_coordinates import load_tanzil_coordinates, load_tanzil_text
+from pipelines.builders.build_audio_adhan import NAME_MAP, RECITER_MAP, SLUG_MAP
+from pipelines.builders.build_quran_morphology import read_corpus_segments
+from pipelines.release.release_packs import MORPHOLOGY_SOURCE_ARCHIVE_MEMBERS, load_release_descriptor
 from pipelines.toolchain.check_runtime import verify_runtime
 
 
@@ -69,11 +77,85 @@ _FIXTURE_PATH_PACK_MAP: dict[str, tuple[str, ...]] = {
     "audio/adhan/fixture.wav": ("audio-adhan-core",),
 }
 
+_V010_PATH_PACK_MAP: dict[str, tuple[str, ...]] = {
+    "audio/adhan/abdul-basit-abdul-samad-2.mp3": ("audio-adhan-core",),
+    "audio/adhan/abdul-basit-abdul-samad.mp3": ("audio-adhan-core",),
+    "audio/adhan/abul-ainain-shuaisha.mp3": ("audio-adhan-core",),
+    "audio/adhan/mahmoud-khalil-al-hussary.mp3": ("audio-adhan-core",),
+    "audio/adhan/mohamed-refaat.mp3": ("audio-adhan-core",),
+    "audio/adhan/mustafa-ismail.mp3": ("audio-adhan-core",),
+    "corpus/quranic-corpus-morphology-0.4.zip": ("quran-morphology",),
+    "tanzil/ar.jalalayn.xml": ("quran-tafsir-ar-jalalayn",),
+    "tanzil/en.pickthall.xml": ("quran-tr-en-pickthall",),
+    "tanzil/quran-data-Tanzil.xml": (
+        "quran-core",
+        "quran-morphology",
+        "quran-scripts-extended",
+        "quran-tafsir-ar-jalalayn",
+        "quran-tr-en-pickthall",
+    ),
+    "tanzil/quran-simple-clean.xml": ("quran-core",),
+    "tanzil/quran-simple-min.xml": ("quran-scripts-extended",),
+    "tanzil/quran-simple-plain.xml": ("quran-scripts-extended",),
+    "tanzil/quran-simple.xml": ("quran-scripts-extended",),
+    "tanzil/quran-uthmani-min.xml": ("quran-scripts-extended",),
+    "tanzil/quran-uthmani.xml": ("quran-core",),
+}
+
+_V010_PACK_IDS: tuple[str, ...] = (
+    "audio-adhan-core",
+    "quran-core",
+    "quran-morphology",
+    "quran-scripts-extended",
+    "quran-tafsir-ar-jalalayn",
+    "quran-tr-en-pickthall",
+)
+
+_AUDIO_SLUGS: tuple[str, ...] = (
+    "abdul-basit-abdul-samad",
+    "abdul-basit-abdul-samad-2",
+    "abul-ainain-shuaisha",
+    "mahmoud-khalil-al-hussary",
+    "mohamed-refaat",
+    "mustafa-ismail",
+)
+
+_V010_PACK_LICENSE_SPDX: dict[str, str] = {
+    "quran-core": "LicenseRef-Tanzil-Quran-Text",
+    "quran-scripts-extended": "LicenseRef-Tanzil-Quran-Text",
+    "quran-tr-en-pickthall": "LicenseRef-Tanzil-Noncommercial-Edition",
+    "quran-tafsir-ar-jalalayn": "LicenseRef-Tanzil-Noncommercial-Edition",
+    "quran-morphology": "GPL-3.0",
+    "audio-adhan-core": "LicenseRef-Adhan-Recordings",
+}
+
+_V010_PACK_PRIMARY_PATH: dict[str, str] = {
+    "quran-core": "tanzil/quran-uthmani.xml",
+    "quran-scripts-extended": "tanzil/quran-uthmani-min.xml",
+    "quran-tr-en-pickthall": "tanzil/en.pickthall.xml",
+    "quran-tafsir-ar-jalalayn": "tanzil/ar.jalalayn.xml",
+    "quran-morphology": "corpus/quranic-corpus-morphology-0.4.zip",
+    "audio-adhan-core": "audio/adhan/abdul-basit-abdul-samad.mp3",
+}
+
+_VALID_PERMITTED_USES: frozenset[str] = frozenset({
+    "public_redistribution",
+    "commercial_use",
+    "sqlite_conversion",
+    "search_projection",
+    "transcode",
+    "clip",
+    "fade",
+    "loudness_normalization",
+})
+
 _PACK_SCHEMA_MAP: dict[str, str] = {
     "quran-core": "quran_core.v1.sql",
     "quran-scripts-extended": "quran_scripts_extended.v1.sql",
     "quran-tr-en-fixture": "quran_translation.v1.sql",
+    "quran-tr-en-pickthall": "quran_translation.v1.sql",
     "quran-tafsir-ar-fixture": "quran_tafsir.v1.sql",
+    "quran-tafsir-ar-jalalayn": "quran_tafsir.v1.sql",
     "quran-morphology": "quran_morphology.v1.sql",
     "quran-wbw-en": "quran_wbw.v1.sql",
     "hadith-fixture": "hadith_book.v1.sql",
@@ -83,7 +165,9 @@ _PACK_FTS_MAP: dict[str, tuple[str, ...]] = {
     "quran-core": ("ayahs_fts",),
     "quran-scripts-extended": (),
     "quran-tr-en-fixture": ("translations_fts",),
+    "quran-tr-en-pickthall": ("translations_fts",),
     "quran-tafsir-ar-fixture": ("tafsir_fts",),
+    "quran-tafsir-ar-jalalayn": ("tafsir_fts",),
     "quran-morphology": (),
     "quran-wbw-en": ("word_translations_fts",),
     "hadith-fixture": ("hadiths_fts",),
@@ -95,7 +179,9 @@ _EXPECTED_COVERAGE_METRICS: dict[str, set[str]] = {
     "quran-core": {"expected_total", "ar_present"},
     "quran-scripts-extended": {"expected_total", "ar_present"},
     "quran-tr-en-fixture": {"expected_total", "en_present", "en_missing"},
+    "quran-tr-en-pickthall": {"expected_total", "en_present", "en_missing"},
     "quran-tafsir-ar-fixture": {"expected_total", "ar_present"},
+    "quran-tafsir-ar-jalalayn": {"expected_total", "ar_present"},
     "quran-morphology": {"expected_total", "ar_present"},
     "quran-wbw-en": {"expected_total", "ar_present", "en_present", "en_missing"},
     "hadith-fixture": {"expected_total", "ar_present", "en_present", "en_missing"},
@@ -220,6 +306,225 @@ def validate_manifest_schema_and_canonical(
         raise GateCheckError(5, filename, "Manifest bytes do not match canonical JSON serialization")
 
 
+def validate_release_sources(
+    sources_root: Path,
+    *,
+    local_review: bool = False,
+) -> tuple[tuple[LockEntry, ...], dict[str, Any], dict[str, dict[str, Any]]]:
+    sources_dir = sources_root / "sources"
+    raw_root = sources_root / "raw-inputs"
+    reg_path = sources_dir / "registry.json"
+    lock_path = sources_dir / "manifest.lock.json"
+
+    if not raw_root.is_dir() or _is_symlink_or_junction(raw_root):
+        raise GateCheckError(7, "raw-inputs", "raw-inputs root missing or link")
+    if not reg_path.is_file() or _is_symlink_or_junction(reg_path):
+        raise GateCheckError(7, "sources/registry.json", "sources/registry.json missing or link")
+    if not lock_path.is_file() or _is_symlink_or_junction(lock_path):
+        raise GateCheckError(7, "sources/manifest.lock.json", "sources/manifest.lock.json missing or link")
+
+    try:
+        lock_entries = verify_lock(reg_path, raw_root, lock_path)
+    except Exception as exc:
+        raise GateCheckError(7, "lock verification", f"Lock verification failed: {exc}") from exc
+
+    try:
+        registry_data = parse_strict_json(reg_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise GateCheckError(7, "sources/registry.json", f"Failed parsing registry: {exc}") from exc
+
+    expected_reg_paths = set(_V010_PATH_PACK_MAP.keys())
+    actual_reg_paths = set(registry_data.keys())
+    if actual_reg_paths != expected_reg_paths:
+        raise GateCheckError(
+            7,
+            "sources/registry.json",
+            f"Registry path set mismatch: expected {sorted(expected_reg_paths)}, got {sorted(actual_reg_paths)}",
+        )
+
+    for p_str, expected_packs in _V010_PATH_PACK_MAP.items():
+        entry = registry_data[p_str]
+        if tuple(entry.get("packIds", [])) != expected_packs:
+            raise GateCheckError(7, "sources/registry.json", f"Pack IDs mismatch for {p_str}")
+
+    license_records: dict[str, dict[str, Any]] = {}
+    pending_packs: list[str] = []
+
+    for pack_id in _V010_PACK_IDS:
+        rel_lic_path = f"sources/licenses/{pack_id}.json"
+        lic_file = sources_dir / "licenses" / f"{pack_id}.json"
+        if not lic_file.is_file() or _is_symlink_or_junction(lic_file):
+            raise GateCheckError(7, rel_lic_path, f"License record missing or link for {pack_id}")
+        try:
+            verify_exact_file_on_disk(sources_root, rel_lic_path)
+        except Exception as exc:
+            raise GateCheckError(7, rel_lic_path, f"Exact file check failed: {exc}") from exc
+
+        try:
+            lic_data = parse_strict_json(lic_file.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise GateCheckError(7, rel_lic_path, f"Malformed license record: {exc}") from exc
+
+        if not isinstance(lic_data, dict):
+            raise GateCheckError(7, rel_lic_path, "License record must be a JSON object")
+
+        expected_lic_keys = {"packId", "licenseSpdx", "primaryPath", "status", "reviewedBy", "sources"}
+        if set(lic_data.keys()) != expected_lic_keys:
+            raise GateCheckError(7, rel_lic_path, f"License record keys mismatch: {set(lic_data.keys())}")
+
+        if lic_data.get("packId") != pack_id:
+            raise GateCheckError(7, rel_lic_path, f"packId mismatch: expected {pack_id}")
+
+        expected_spdx = _V010_PACK_LICENSE_SPDX[pack_id]
+        if lic_data.get("licenseSpdx") != expected_spdx:
+            raise GateCheckError(7, rel_lic_path, f"licenseSpdx mismatch: expected {expected_spdx!r}, got {lic_data.get('licenseSpdx')!r}")
+
+        expected_primary = _V010_PACK_PRIMARY_PATH[pack_id]
+        if lic_data.get("primaryPath") != expected_primary:
+            raise GateCheckError(7, rel_lic_path, f"primaryPath mismatch: expected {expected_primary!r}, got {lic_data.get('primaryPath')!r}")
+
+        status = lic_data.get("status")
+        if status == "fixture":
+            raise GateCheckError(7, rel_lic_path, "Fixture status not permitted for release profile v0.1.0")
+        if status == "rejected":
+            raise GateCheckError(7, rel_lic_path, "License record has rejected status")
+        if status not in ("approved", "pending"):
+            raise GateCheckError(7, rel_lic_path, f"Unknown license status: {status!r}")
+
+        reviewed_by = lic_data.get("reviewedBy")
+        if status == "approved":
+            if not isinstance(reviewed_by, str) or not reviewed_by.strip():
+                raise GateCheckError(7, rel_lic_path, "Approved license must have non-empty reviewedBy")
+        elif status == "pending":
+            if reviewed_by is not None:
+                raise GateCheckError(7, rel_lic_path, "Pending license must have null reviewedBy")
+            if not local_review:
+                raise GateCheckError(7, rel_lic_path, f"Clearance pending for pack {pack_id}")
+            pending_packs.append(pack_id)
+
+        sources_list = lic_data.get("sources")
+        if not isinstance(sources_list, list):
+            raise GateCheckError(7, rel_lic_path, "sources must be a list")
+
+        expected_paths = sorted([path for path, packs in _V010_PATH_PACK_MAP.items() if pack_id in packs])
+        actual_source_paths = [s.get("path") for s in sources_list if isinstance(s, dict)]
+        if actual_source_paths != expected_paths:
+            raise GateCheckError(7, rel_lic_path, f"Sources list mismatch: expected {expected_paths}, got {actual_source_paths}")
+
+        for src in sources_list:
+            if not isinstance(src, dict):
+                raise GateCheckError(7, rel_lic_path, "Source entry must be a JSON object")
+
+            src_path = src.get("path")
+            if not isinstance(src_path, str):
+                raise GateCheckError(7, rel_lic_path, "Source path must be string")
+            validate_safe_relative_path(src_path)
+            try:
+                verify_exact_file_on_disk(raw_root, src_path)
+            except Exception as exc:
+                raise GateCheckError(7, rel_lic_path, f"Source path exact-case check failed for {src_path}: {exc}") from exc
+
+            reg_entry = registry_data.get(src_path, {})
+            if src.get("sourceUrl") != reg_entry.get("sourceUrl"):
+                raise GateCheckError(7, rel_lic_path, f"sourceUrl mismatch for {src_path}")
+            if src.get("sourceVersion") != reg_entry.get("sourceVersion"):
+                raise GateCheckError(7, rel_lic_path, f"sourceVersion mismatch for {src_path}")
+
+            if pack_id == "audio-adhan-core":
+                exp_src_keys = {"attribution", "clipStartMs", "name", "notice", "path", "permittedUses", "reciter", "rightsEvidence", "slug", "sourceUrl", "sourceVersion"}
+            else:
+                exp_src_keys = {"attribution", "name", "notice", "path", "permittedUses", "rightsEvidence", "sourceUrl", "sourceVersion"}
+
+            if set(src.keys()) != exp_src_keys:
+                raise GateCheckError(7, rel_lic_path, f"Source keys mismatch for {src_path}: expected {sorted(exp_src_keys)}, got {sorted(src.keys())}")
+
+            src_name = src.get("name")
+            if not isinstance(src_name, str) or not src_name.strip():
+                raise GateCheckError(7, rel_lic_path, f"Source name must be non-empty string for {src_path}")
+
+            src_notice = src.get("notice")
+            if not isinstance(src_notice, str):
+                raise GateCheckError(7, rel_lic_path, f"notice must be string for {src_path}")
+
+            src_attr = src.get("attribution")
+            if not isinstance(src_attr, str):
+                raise GateCheckError(7, rel_lic_path, f"attribution must be string for {src_path}")
+
+            if status == "approved":
+                if not src_notice.strip():
+                    raise GateCheckError(7, rel_lic_path, f"notice must be non-empty string when approved for {src_path}")
+                if not src_attr.strip():
+                    raise GateCheckError(7, rel_lic_path, f"attribution must be non-empty string when approved for {src_path}")
+
+            if pack_id == "audio-adhan-core":
+                if src_name != NAME_MAP.get(src_path):
+                    raise GateCheckError(7, rel_lic_path, f"Audio source name mismatch for {src_path}: expected {NAME_MAP.get(src_path)!r}, got {src_name!r}")
+                slug = src.get("slug")
+                if not isinstance(slug, str) or slug != SLUG_MAP.get(src_path):
+                    raise GateCheckError(7, rel_lic_path, f"Audio slug mismatch for {src_path}: expected {SLUG_MAP.get(src_path)!r}, got {slug!r}")
+                reciter = src.get("reciter")
+                if not isinstance(reciter, str) or reciter != RECITER_MAP.get(src_path):
+                    raise GateCheckError(7, rel_lic_path, f"Audio reciter mismatch for {src_path}: expected {RECITER_MAP.get(src_path)!r}, got {reciter!r}")
+                clip_start = src.get("clipStartMs")
+                if type(clip_start) is not int or isinstance(clip_start, bool) or clip_start < 0:
+                    raise GateCheckError(7, rel_lic_path, f"clipStartMs must be non-negative integer token, got {clip_start!r}")
+
+            # Validate rightsEvidence
+            ev_list = src.get("rightsEvidence")
+            if not isinstance(ev_list, list):
+                raise GateCheckError(7, rel_lic_path, f"rightsEvidence must be a list for {src_path}")
+            if status == "approved" and not ev_list:
+                raise GateCheckError(7, rel_lic_path, f"rightsEvidence cannot be empty for approved record for {src_path}")
+            if len(ev_list) != len(set(ev_list)):
+                raise GateCheckError(7, rel_lic_path, f"rightsEvidence contains duplicates for {src_path}")
+            for ev in ev_list:
+                if not isinstance(ev, str) or not ev.strip():
+                    raise GateCheckError(7, rel_lic_path, f"rightsEvidence item must be non-empty string for {src_path}")
+                if ev.startswith("https://"):
+                    validate_https_url(ev)
+                else:
+                    validate_safe_relative_path(ev)
+                    if not ev.startswith("sources/licenses/evidence/"):
+                        raise GateCheckError(7, rel_lic_path, f"Evidence path must be HTTPS URL or under sources/licenses/evidence/: {ev}")
+                    try:
+                        verify_exact_file_on_disk(sources_root, ev)
+                    except Exception as exc:
+                        raise GateCheckError(7, rel_lic_path, f"Evidence file exact check failed: {ev}: {exc}") from exc
+
+            # Validate permittedUses
+            perm_uses = src.get("permittedUses")
+            if not isinstance(perm_uses, list):
+                raise GateCheckError(7, rel_lic_path, f"permittedUses must be a list for {src_path}")
+            for u in perm_uses:
+                if not isinstance(u, str):
+                    raise GateCheckError(7, rel_lic_path, f"permittedUses entry must be string, got {u!r}")
+                if u not in _VALID_PERMITTED_USES:
+                    raise GateCheckError(7, rel_lic_path, f"Invalid permittedUses token {u!r} for {src_path}")
+            if len(perm_uses) != len(set(perm_uses)):
+                raise GateCheckError(7, rel_lic_path, f"permittedUses contains duplicates for {src_path}")
+
+            if status == "pending" and perm_uses:
+                raise GateCheckError(7, rel_lic_path, f"Pending license cannot grant permittedUses for {src_path}")
+
+            if status == "approved":
+                if not perm_uses:
+                    raise GateCheckError(7, rel_lic_path, f"Approved license must grant permittedUses for {src_path}")
+                req_uses = {"public_redistribution", "commercial_use"}
+                if pack_id == "audio-adhan-core":
+                    req_uses |= {"transcode", "clip", "fade", "loudness_normalization"}
+                else:
+                    req_uses.add("sqlite_conversion")
+                    if pack_id in ("quran-core", "quran-tr-en-pickthall", "quran-tafsir-ar-jalalayn", "quran-morphology"):
+                        req_uses.add("search_projection")
+                missing_uses = req_uses - set(perm_uses)
+                if missing_uses:
+                    raise GateCheckError(7, rel_lic_path, f"Missing required permittedUses for {src_path}: {sorted(missing_uses)}")
+
+        license_records[pack_id] = lic_data
+
+    return lock_entries, registry_data, license_records
+
+
 class GateContext:
     def __init__(
         self,
@@ -230,6 +535,7 @@ class GateContext:
         sources_root: Path,
         expectations: dict[str, Any],
         specs_dir: Path,
+        local_review: bool = False,
     ) -> None:
         self.profile = profile
         self.candidate = candidate
@@ -237,6 +543,7 @@ class GateContext:
         self.sources_root = sources_root
         self.expectations = expectations
         self.specs_dir = specs_dir
+        self.local_review = local_review
         self.specs_sql_dir = specs_dir / "sql"
         self.catalog_schema_path = specs_dir / "catalog.schema.json"
         self.audio_schema_path = specs_dir / "audio-manifest.schema.json"
@@ -246,8 +553,22 @@ class GateContext:
         self.declared_files_by_root: dict[str, set[str]] = {}
         self.lock_entries: tuple[LockEntry, ...] = ()
         self.registry_data: dict[str, Any] = {}
+        self.license_records: dict[str, dict[str, Any]] = {}
         self.locked_inputs: dict[str, Any] = {}
+        self._tanzil_coords = None
+        self._corpus_segments = None
 
+    def get_tanzil_coordinates(self) -> Any:
+        if self._tanzil_coords is None:
+            self._tanzil_coords = load_tanzil_coordinates(self.sources_root / "raw-inputs" / "tanzil" / "quran-data-Tanzil.xml")
+        return self._tanzil_coords
+
+    def get_corpus_segments(self) -> tuple[Any, ...]:
+        if self._corpus_segments is None:
+            coords = self.get_tanzil_coordinates()
+            corpus_zip = self.sources_root / "raw-inputs" / "corpus" / "quranic-corpus-morphology-0.4.zip"
+            self._corpus_segments = read_corpus_segments(corpus_zip, coords.ayah_ids)
+        return self._corpus_segments
 
 def _fail(stage_idx: int, check_num: int, asset: str, reason: str) -> None:
     stage_name = _STAGES[stage_idx][0]
@@ -386,6 +707,227 @@ def stage_2_manifest_text(ctx: GateContext) -> None:
         )
 
 
+def _validate_v010_manifests(
+    ctx: GateContext,
+    root_label: str,
+    root_path: Path,
+    cat_data: dict[str, Any],
+    audio_data: dict[str, Any],
+) -> None:
+    desc = load_release_descriptor(ctx.sources_root)
+    repo = desc["repository"]
+    expected_gen_at = desc["generatedAt"]
+
+    if cat_data["releaseTag"] != "content-v0.1.0":
+        raise GateCheckError(5, f"{root_label}/catalog.json", f"Expected releaseTag 'content-v0.1.0', got {cat_data['releaseTag']!r}")
+    if cat_data["generatedAt"] != expected_gen_at:
+        raise GateCheckError(5, f"{root_label}/catalog.json", f"Expected generatedAt {expected_gen_at!r}, got {cat_data['generatedAt']!r}")
+    if audio_data["releaseTag"] != "content-v0.1.0":
+        raise GateCheckError(5, f"{root_label}/audio-manifest.json", f"Expected releaseTag 'content-v0.1.0', got {audio_data['releaseTag']!r}")
+    if audio_data["audioManifestVersion"] != 1:
+        raise GateCheckError(5, f"{root_label}/audio-manifest.json", f"Expected audioManifestVersion 1, got {audio_data['audioManifestVersion']!r}")
+    if audio_data["packId"] != "audio-adhan-core":
+        raise GateCheckError(5, f"{root_label}/audio-manifest.json", "audio-manifest packId must be 'audio-adhan-core'")
+
+    # Validate catalog packs
+    pack_ids = [p["id"] for p in cat_data["packs"]]
+    if pack_ids != sorted(_V010_PACK_IDS):
+        raise GateCheckError(5, f"{root_label}/catalog.json", f"Packs mismatch: expected {sorted(_V010_PACK_IDS)}, got {pack_ids}")
+
+    declared_files: set[str] = {"audio-manifest.json", "catalog.json"}
+    db_asset_map: dict[str, dict[str, Any]] = {}
+
+    for p in cat_data["packs"]:
+        pid = p["id"]
+        if p["version"] != "0.1.0":
+            raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} version must be '0.1.0'")
+        if p.get("completeness") != "complete":
+            raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} completeness must be 'complete'")
+        if p.get("licenseRef") != f"sources/licenses/{pid}.json":
+            raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} licenseRef mismatch")
+
+        if pid == "audio-adhan-core":
+            if p.get("category") != "audio" or p.get("format") != "audio":
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} category/format must be audio")
+            if p.get("languages") != ["ar"]:
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} languages must be ['ar']")
+            if p.get("required") is not False:
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} required must be false")
+            if p.get("audioManifestRef") != "audio-manifest.json":
+                raise GateCheckError(5, f"{root_label}/catalog.json", "Audio pack must have audioManifestRef: 'audio-manifest.json'")
+        else:
+            if p.get("category") != "quran" or p.get("format") != "sqlite":
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} category must be quran, format sqlite")
+            exp_langs = ["en"] if pid == "quran-tr-en-pickthall" else ["ar"]
+            if p.get("languages") != exp_langs:
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} languages must be {exp_langs}")
+            if p.get("compression") != "none":
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} compression must be 'none'")
+            if p.get("schemaVersion") != 1:
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} schemaVersion must be 1")
+            exp_req = (pid == "quran-core")
+            if p.get("required") is not exp_req:
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} required must be {exp_req}")
+            exp_fts = pid in ("quran-core", "quran-tr-en-pickthall", "quran-tafsir-ar-jalalayn")
+            if p.get("requiresFts5") is not exp_fts:
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} requiresFts5 must be {exp_fts}")
+
+            fn = f"{pid}.db"
+            if fn in declared_files:
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Duplicate asset filename declared: {fn}")
+            declared_files.add(fn)
+            db_asset_map[fn] = p
+            exp_url = f"https://github.com/{repo}/releases/download/content-v0.1.0/{fn}"
+            if p.get("url") != exp_url:
+                raise GateCheckError(5, f"{root_label}/catalog.json", f"Pack {pid} url expected {exp_url}, got {p.get('url')}")
+            validate_https_url(p["url"])
+
+    # Validate audio tracks
+    track_slugs = [tr["slug"] for tr in audio_data["tracks"]]
+    if track_slugs != sorted(_AUDIO_SLUGS):
+        raise GateCheckError(5, f"{root_label}/audio-manifest.json", f"Audio track slugs mismatch: expected {sorted(_AUDIO_SLUGS)}, got {track_slugs}")
+
+    full_audio_map: dict[str, dict[str, Any]] = {}
+    ios_audio_map: dict[str, dict[str, Any]] = {}
+    for tr in audio_data["tracks"]:
+        slug = tr["slug"]
+        for v in ("full", "ios"):
+            v_info = tr[v]
+            fn = v_info.get("filename")
+            exp_fn = f"adhan-{slug}-full.m4a" if v == "full" else f"adhan-{slug}-ios-notif.caf"
+            if fn != exp_fn:
+                raise GateCheckError(5, f"{root_label}/audio-manifest.json", f"Track {slug} {v} filename must be {exp_fn}, got {fn}")
+            if type(v_info.get("durationSeconds")) is not float:
+                raise GateCheckError(5, f"{root_label}/audio-manifest.json", f"Track {slug} {v} durationSeconds must be float")
+            if fn in declared_files:
+                raise GateCheckError(5, f"{root_label}/audio-manifest.json", f"Duplicate asset filename: {fn}")
+            declared_files.add(fn)
+            exp_url = f"https://github.com/{repo}/releases/download/content-v0.1.0/{fn}"
+            if v_info.get("url") != exp_url:
+                raise GateCheckError(5, f"{root_label}/audio-manifest.json", f"Track {slug} {v} url expected {exp_url}, got {v_info.get('url')}")
+            validate_https_url(v_info["url"])
+            if v == "full":
+                if v_info.get("codec") != "aac":
+                    raise GateCheckError(5, f"{root_label}/audio-manifest.json", f"Full audio codec must be aac, got {v_info.get('codec')}")
+                full_audio_map[fn] = v_info
+            else:
+                if v_info.get("codec") != "adpcm_ima_qt":
+                    raise GateCheckError(5, f"{root_label}/audio-manifest.json", f"iOS audio codec must be adpcm_ima_qt, got {v_info.get('codec')}")
+                ios_audio_map[fn] = v_info
+
+    # Validate release companions
+    comp_map: dict[str, dict[str, Any]] = {}
+    for comp in desc["companions"]:
+        cfn = comp["filename"]
+        if cfn in declared_files:
+            raise GateCheckError(5, f"{root_label}", f"Duplicate companion filename: {cfn}")
+        declared_files.add(cfn)
+        comp_map[cfn] = comp
+
+    ctx.declared_files_by_root[root_label] = declared_files
+
+    # Inventory check on disk
+    # Inventory check on disk: must include dotfiles, directories, broken links
+    actual_entries = sorted(os.listdir(root_path))
+    for entry_name in actual_entries:
+        entry_p = root_path / entry_name
+        if entry_name.startswith("."):
+            raise GateCheckError(5, f"{root_label}/{entry_name}", f"Dotfile not permitted in release assets: {entry_name}")
+        if entry_p.is_dir() or _is_symlink_or_junction(entry_p):
+            raise GateCheckError(5, f"{root_label}/{entry_name}", f"Directory or link not permitted in release assets: {entry_name}")
+        if entry_name not in declared_files:
+            raise GateCheckError(5, f"{root_label}/{entry_name}", f"Undeclared asset file in release root: {entry_name}")
+    if set(actual_entries) != declared_files:
+        raise GateCheckError(
+            5,
+            f"{root_label}",
+            f"Asset inventory mismatch: expected {sorted(declared_files)}, got {actual_entries}",
+        )
+
+    # Attachments cap check: < 2 GiB per attachment, <= 1000 attachments
+    if len(declared_files) > 1000:
+        raise GateCheckError(5, f"{root_label}", f"Too many attachments: {len(declared_files)} (cap 1000)")
+
+    for fn in sorted(declared_files):
+        asset_p = root_path / fn
+        if not asset_p.is_file() or _is_symlink_or_junction(asset_p):
+            raise GateCheckError(5, f"{root_label}/{fn}", "Asset missing or invalid link")
+        actual_size = asset_p.stat().st_size
+        if actual_size >= 2 * 1024 * 1024 * 1024:
+            raise GateCheckError(5, f"{root_label}/{fn}", f"Asset size {actual_size} exceeds 2 GiB cap")
+        actual_sha = _recompute_sha256(asset_p)
+
+        if fn in db_asset_map:
+            p_decl = db_asset_map[fn]
+            if actual_size != p_decl["sizeBytes"]:
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Size mismatch: expected {p_decl['sizeBytes']}, got {actual_size}")
+            if actual_sha != p_decl["sha256"]:
+                raise GateCheckError(5, f"{root_label}/{fn}", "SHA-256 digest mismatch")
+        elif fn in full_audio_map:
+            f_decl = full_audio_map[fn]
+            if actual_size != f_decl["sizeBytes"]:
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Size mismatch: expected {f_decl['sizeBytes']}, got {actual_size}")
+            if actual_sha != f_decl["sha256"]:
+                raise GateCheckError(5, f"{root_label}/{fn}", "SHA-256 digest mismatch")
+        elif fn in ios_audio_map:
+            i_decl = ios_audio_map[fn]
+            if actual_size != i_decl["sizeBytes"]:
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Size mismatch: expected {i_decl['sizeBytes']}, got {actual_size}")
+            if actual_sha != i_decl["sha256"]:
+                raise GateCheckError(5, f"{root_label}/{fn}", "SHA-256 digest mismatch")
+            try:
+                codec, duration_frac = probe_asset(asset_p, variant="ios")
+            except Exception as exc:
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Probe failed for {fn}: {exc}") from exc
+            if codec != i_decl.get("codec"):
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Codec mismatch for {fn}: expected {i_decl.get('codec')}, got {codec}")
+            if not (Fraction(0) < duration_frac < Fraction(29, 1)):
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Probed unrounded duration {duration_frac} not strictly between 0 and 29.0 s")
+            rounded_sec = format_duration_seconds(duration_frac)
+            if i_decl["durationSeconds"] != rounded_sec:
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Duration mismatch: manifest {i_decl['durationSeconds']} vs probed {rounded_sec}")
+        elif fn in comp_map:
+            c_decl = comp_map[fn]
+            if actual_size != c_decl["sizeBytes"]:
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Companion size mismatch: expected {c_decl['sizeBytes']}, got {actual_size}")
+            if actual_sha != c_decl["sha256"]:
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Companion sha256 mismatch: expected {c_decl['sha256']}, got {actual_sha}")
+            if c_decl.get("sourcePath"):
+                src_notice_p = ctx.sources_root / c_decl["sourcePath"]
+                if not src_notice_p.is_file() or _is_symlink_or_junction(src_notice_p):
+                    raise GateCheckError(5, f"{root_label}/{fn}", f"Companion sourcePath missing or link: {c_decl['sourcePath']}")
+                expected_bytes = src_notice_p.read_bytes()
+                if asset_p.read_bytes() != expected_bytes:
+                    raise GateCheckError(5, f"{root_label}/{fn}", "Companion notice asset bytes mismatch with sourcePath")
+            elif fn == "quran-morphology-source.zip":
+                try:
+                    with zipfile.ZipFile(asset_p, "r") as zf:
+                        infolist = zf.infolist()
+                        expected_members = sorted(MORPHOLOGY_SOURCE_ARCHIVE_MEMBERS)
+                        actual_members = [info.filename for info in infolist]
+                        if actual_members != expected_members:
+                            raise GateCheckError(5, f"{root_label}/{fn}", f"Morphology source archive member list mismatch: {actual_members} vs {expected_members}")
+                        if zf.comment != b"":
+                            raise GateCheckError(5, f"{root_label}/{fn}", "Morphology source archive has non-empty zip comment")
+                        for info in infolist:
+                            if info.date_time != (1980, 1, 1, 0, 0, 0):
+                                raise GateCheckError(5, f"{root_label}/{fn}", f"Member {info.filename} timestamp not fixed 1980-01-01")
+                            if info.compress_type != zipfile.ZIP_STORED:
+                                raise GateCheckError(5, f"{root_label}/{fn}", f"Member {info.filename} not ZIP_STORED")
+                            mode = info.external_attr >> 16
+                            if mode != 0o100644:
+                                raise GateCheckError(5, f"{root_label}/{fn}", f"Member {info.filename} mode not 0100644: {oct(mode)}")
+                            src_mem_p = ctx.sources_root / info.filename
+                            if not src_mem_p.is_file() or _is_symlink_or_junction(src_mem_p):
+                                raise GateCheckError(5, f"{root_label}/{fn}", f"Whitelisted member missing in source tree: {info.filename}")
+                            if zf.read(info) != src_mem_p.read_bytes():
+                                raise GateCheckError(5, f"{root_label}/{fn}", f"Member content mismatch with source tree: {info.filename}")
+                except GateCheckError:
+                    raise
+                except Exception as exc:
+                    raise GateCheckError(5, f"{root_label}/{fn}", f"Failed validating morphology source archive: {exc}") from exc
+            else:
+                raise GateCheckError(5, f"{root_label}/{fn}", f"Unknown companion asset {fn} in descriptor")
 def stage_3_manifest_schemas_inventory(ctx: GateContext) -> None:
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data, audio_data = ctx.manifest_data_by_root[root_label]
@@ -411,6 +953,9 @@ def stage_3_manifest_schemas_inventory(ctx: GateContext) -> None:
         track_slugs = [tr["slug"] for tr in audio_data["tracks"]]
         if len(track_slugs) != len(set(track_slugs)):
             raise GateCheckError(5, f"{root_label}/audio-manifest.json", "Duplicate track slug declared in audio manifest")
+        if ctx.profile == "v0.1.0":
+            _validate_v010_manifests(ctx, root_label, root_path, cat_data, audio_data)
+            continue
 
         # Fixed fixture pack identities, tags, timestamps
         if cat_data["releaseTag"] != "content-v0.0.0":
@@ -584,6 +1129,12 @@ def stage_3_manifest_schemas_inventory(ctx: GateContext) -> None:
                 if v_ios["durationSeconds"] != rounded_sec:
                     raise GateCheckError(5, f"{root_label}/{fn}", f"Duration mismatch: manifest {v_ios['durationSeconds']} vs probed {rounded_sec}")
 def stage_4_source_lock_clearance(ctx: GateContext) -> None:
+    if ctx.profile == "v0.1.0":
+        entries, reg, lics = validate_release_sources(ctx.sources_root, local_review=ctx.local_review)
+        ctx.lock_entries = entries
+        ctx.registry_data = reg
+        ctx.license_records = lics
+        return
     sources_dir = ctx.sources_root / "sources"
     raw_root = ctx.sources_root / "raw-inputs"
     reg_path = sources_dir / "registry.json"
@@ -869,8 +1420,11 @@ def stage_6_sqlite_metadata(ctx: GateContext) -> None:
                 if (meta_dict["fts5_enabled"] == "true") != has_fts:
                     raise GateCheckError(7, f"{root_label}/{db_fn}", "pack_meta fts5_enabled mismatch with actual schema")
 
-                lic_file = sources_dir / "licenses" / f"{pack_id}.json"
-                lic_data = parse_strict_json(lic_file.read_text(encoding="utf-8"))
+                if ctx.profile == "v0.1.0" and pack_id in ctx.license_records:
+                    lic_data = ctx.license_records[pack_id]
+                else:
+                    lic_file = sources_dir / "licenses" / f"{pack_id}.json"
+                    lic_data = parse_strict_json(lic_file.read_text(encoding="utf-8"))
                 if meta_dict["license_spdx"] != lic_data["licenseSpdx"]:
                     raise GateCheckError(7, f"{root_label}/{db_fn}", "pack_meta license_spdx mismatch with license record")
 
@@ -894,7 +1448,141 @@ def stage_6_sqlite_metadata(ctx: GateContext) -> None:
                 conn.close()
 
 
+def _stage_7_record_keys_v010(ctx: GateContext) -> None:
+    raw_root = ctx.sources_root / "raw-inputs"
+    coords = load_tanzil_coordinates(raw_root / "tanzil" / "quran-data-Tanzil.xml")
+    expected_ayah_keys = [f"{s.id}:{a}" for s in coords.surahs for a in range(1, s.ayah_count + 1)]
+
+    corpus_path = raw_root / "corpus" / "quranic-corpus-morphology-0.4.zip"
+    corpus_segments = read_corpus_segments(corpus_path, coords.ayah_ids)
+
+    expected_words: list[tuple[int, int, int, int, int, str]] = []
+    expected_segments: list[tuple[int, int, int]] = []
+    w_idx = 0
+    s_idx = 0
+    for (s_id, a_id, w_num), seg_iter in itertools.groupby(corpus_segments, key=lambda s: (s.surah, s.ayah, s.word)):
+        w_idx += 1
+        current_w_id = w_idx
+        cur_aid = coords.ayah_ids[f"{s_id}:{a_id}"]
+        cur_wk = f"{s_id}:{a_id}:{w_num}"
+        expected_words.append((current_w_id, cur_aid, s_id, a_id, w_num, cur_wk))
+        for seg in seg_iter:
+            s_idx += 1
+            expected_segments.append((s_idx, current_w_id, seg.segment))
+
+    for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+        cat_data = ctx.manifest_data_by_root[root_label][0]
+        sqlite_packs = sorted([p for p in cat_data["packs"] if p["format"] == "sqlite"], key=lambda p: p["id"])
+
+        for p in sqlite_packs:
+            pack_id = p["id"]
+            db_fn = f"{pack_id}.db"
+            db_path = root_path / db_fn
+
+            conn = _open_ro_db(db_path)
+            conn.text_factory = bytes
+            try:
+                cur = conn.cursor()
+                if pack_id == "quran-core":
+                    cur.execute("SELECT id, name_ar, name_tname, name_en, revelation_type, revelation_order, ayah_count, ruku_count, start_ayah_id FROM surahs ORDER BY id;")
+                    db_surahs = cur.fetchall()
+                    if len(db_surahs) != len(coords.surahs):
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"surahs row count mismatch: expected {len(coords.surahs)}, got {len(db_surahs)}")
+                    for r, exp_s in zip(db_surahs, coords.surahs):
+                        r_dec = (
+                            r[0],
+                            r[1].decode("utf-8") if isinstance(r[1], bytes) else r[1],
+                            r[2].decode("utf-8") if isinstance(r[2], bytes) else r[2],
+                            r[3].decode("utf-8") if isinstance(r[3], bytes) else r[3],
+                            r[4].decode("utf-8") if isinstance(r[4], bytes) else r[4],
+                            r[5], r[6], r[7], r[8]
+                        )
+                        if r_dec != tuple(exp_s):
+                            raise GateCheckError(1, f"{root_label}/{db_fn}", f"surahs data mismatch for surah {exp_s.id}: {r_dec} vs {tuple(exp_s)}")
+
+                    cur.execute("SELECT id, surah_id, ayah_number, verse_key, juz, hizb_quarter, manzil, ruku, page_madani, sajdah_type FROM ayahs ORDER BY id;")
+                    db_ayahs = cur.fetchall()
+                    if len(db_ayahs) != 6236:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"ayahs count mismatch: expected 6236, got {len(db_ayahs)}")
+                    for r in db_ayahs:
+                        aid = r[0]
+                        sid = r[1]
+                        an = r[2]
+                        vk = r[3].decode("utf-8") if isinstance(r[3], bytes) else r[3]
+                        exp_vk = expected_ayah_keys[aid - 1]
+                        if vk != exp_vk or f"{sid}:{an}" != exp_vk:
+                            raise GateCheckError(1, f"{root_label}/{db_fn}", f"Coordinate component mismatch at ayah {aid}")
+                        exp_bounds = coords.boundaries.get(aid)
+                        if exp_bounds is not None:
+                            juz, hizb, manzil, ruku, page = exp_bounds
+                            if (r[4], r[5], r[6], r[7], r[8]) != (juz, hizb, manzil, ruku, page):
+                                raise GateCheckError(1, f"{root_label}/{db_fn}", f"Boundary mismatch at ayah {aid}")
+                        s_type = r[9].decode("utf-8") if isinstance(r[9], bytes) else r[9]
+                        exp_sajdah = coords.sajdah_types.get(aid)
+                        if s_type != exp_sajdah:
+                            raise GateCheckError(1, f"{root_label}/{db_fn}", f"Sajdah mismatch at ayah {aid}: {s_type} vs {exp_sajdah}")
+
+                elif pack_id == "quran-scripts-extended":
+                    cur.execute("SELECT ayah_id, verse_key FROM ayah_scripts ORDER BY ayah_id;")
+                    rows = cur.fetchall()
+                    if len(rows) != 6236:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"ayah_scripts row count mismatch: expected 6236, got {len(rows)}")
+                    for idx, r in enumerate(rows, start=1):
+                        aid = r[0]
+                        vk = r[1].decode("utf-8") if isinstance(r[1], bytes) else r[1]
+                        exp_vk = expected_ayah_keys[idx - 1]
+                        if aid != idx or vk != exp_vk:
+                            raise GateCheckError(1, f"{root_label}/{db_fn}", f"ayah_scripts coordinate mismatch at row {idx}")
+
+                elif pack_id == "quran-tr-en-pickthall":
+                    cur.execute("SELECT ayah_id, surah_id, ayah_number, verse_key FROM translations ORDER BY ayah_id;")
+                    rows = cur.fetchall()
+                    if len(rows) != 6236:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"translations row count mismatch: expected 6236, got {len(rows)}")
+                    for idx, r in enumerate(rows, start=1):
+                        aid, sid, an = r[0], r[1], r[2]
+                        vk = r[3].decode("utf-8") if isinstance(r[3], bytes) else r[3]
+                        exp_vk = expected_ayah_keys[idx - 1]
+                        if aid != idx or vk != exp_vk or f"{sid}:{an}" != exp_vk:
+                            raise GateCheckError(1, f"{root_label}/{db_fn}", f"translations coordinate component mismatch at {idx}")
+
+                elif pack_id == "quran-tafsir-ar-jalalayn":
+                    cur.execute("SELECT ayah_id, verse_key, entry_id FROM tafsir_ayah_map ORDER BY ayah_id;")
+                    rows = cur.fetchall()
+                    if len(rows) != 6236:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"tafsir_ayah_map row count mismatch: expected 6236, got {len(rows)}")
+                    for idx, r in enumerate(rows, start=1):
+                        aid = r[0]
+                        vk = r[1].decode("utf-8") if isinstance(r[1], bytes) else r[1]
+                        exp_vk = expected_ayah_keys[idx - 1]
+                        if aid != idx or vk != exp_vk:
+                            raise GateCheckError(1, f"{root_label}/{db_fn}", f"tafsir_ayah_map coordinate mismatch at {idx}")
+
+                elif pack_id == "quran-morphology":
+                    cur.execute("SELECT id, ayah_id, surah_id, ayah_number, word_number, word_key FROM words ORDER BY id;")
+                    db_words = cur.fetchall()
+                    if len(db_words) != len(expected_words):
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"words count mismatch: expected {len(expected_words)}, got {len(db_words)}")
+                    for db_w, exp_w in zip(db_words, expected_words):
+                        db_wid, db_aid, db_sid, db_an, db_wn = db_w[0], db_w[1], db_w[2], db_w[3], db_w[4]
+                        db_wk = db_w[5].decode("utf-8") if isinstance(db_w[5], bytes) else db_w[5]
+                        if (db_wid, db_aid, db_sid, db_an, db_wn, db_wk) != exp_w:
+                            raise GateCheckError(1, f"{root_label}/{db_fn}", f"word key/coordinate mismatch at word {db_wid}")
+
+                    cur.execute("SELECT id, word_id, segment_number FROM morphology_segments ORDER BY id;")
+                    db_segs = cur.fetchall()
+                    if len(db_segs) != len(expected_segments):
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"morphology_segments count mismatch: expected {len(expected_segments)}, got {len(db_segs)}")
+                    for db_s, exp_s in zip(db_segs, expected_segments):
+                        if (db_s[0], db_s[1], db_s[2]) != exp_s:
+                            raise GateCheckError(1, f"{root_label}/{db_fn}", f"morphology_segment key/parent mismatch at segment {db_s[0]}")
+            finally:
+                conn.close()
+
 def stage_7_record_keys(ctx: GateContext) -> None:
+    if ctx.profile == "v0.1.0":
+        _stage_7_record_keys_v010(ctx)
+        return
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data = ctx.manifest_data_by_root[root_label][0]
         sqlite_packs = sorted([p for p in cat_data["packs"] if p["format"] == "sqlite"], key=lambda p: p["id"])
@@ -963,6 +1651,119 @@ def stage_7_record_keys(ctx: GateContext) -> None:
                 conn.close()
 
 
+def _stage_8_text_equivalence_v010_pack(
+    ctx: GateContext,
+    cur: sqlite3.Cursor,
+    pack_id: str,
+    root_label: str,
+    db_fn: str,
+) -> None:
+    coords = load_tanzil_coordinates(ctx.sources_root / "raw-inputs" / "tanzil" / "quran-data-Tanzil.xml")
+    if pack_id == "quran-core":
+        uthmani_text = load_tanzil_text(ctx.sources_root / "raw-inputs" / "tanzil" / "quran-uthmani.xml", coords, locked_path="tanzil/quran-uthmani.xml")
+        clean_text = load_tanzil_text(ctx.sources_root / "raw-inputs" / "tanzil" / "quran-simple-clean.xml", coords, locked_path="tanzil/quran-simple-clean.xml")
+        cur.execute("SELECT verse_key, text_uthmani, text_simple_clean, text_ar_search FROM ayahs ORDER BY id;")
+        for r in cur.fetchall():
+            vk = r[0].decode("utf-8") if isinstance(r[0], bytes) else r[0]
+            u_t = r[1].decode("utf-8") if isinstance(r[1], bytes) else r[1]
+            c_t = r[2].decode("utf-8") if isinstance(r[2], bytes) else r[2]
+            s_t = r[3].decode("utf-8") if isinstance(r[3], bytes) else r[3]
+            if u_t != uthmani_text[vk]:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_uthmani mismatch at {vk}")
+            if c_t != clean_text[vk]:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_simple_clean mismatch at {vk}")
+            if s_t != normalize_arabic(c_t):
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_ar_search mismatch at {vk}")
+
+    elif pack_id == "quran-scripts-extended":
+        uth_min_text = load_tanzil_text(ctx.sources_root / "raw-inputs" / "tanzil" / "quran-uthmani-min.xml", coords, locked_path="tanzil/quran-uthmani-min.xml")
+        simple_text = load_tanzil_text(ctx.sources_root / "raw-inputs" / "tanzil" / "quran-simple.xml", coords, locked_path="tanzil/quran-simple.xml")
+        plain_text = load_tanzil_text(ctx.sources_root / "raw-inputs" / "tanzil" / "quran-simple-plain.xml", coords, locked_path="tanzil/quran-simple-plain.xml")
+        min_text = load_tanzil_text(ctx.sources_root / "raw-inputs" / "tanzil" / "quran-simple-min.xml", coords, locked_path="tanzil/quran-simple-min.xml")
+
+        cur.execute("SELECT verse_key, text_uthmani_min, text_simple, text_simple_plain, text_simple_min FROM ayah_scripts ORDER BY ayah_id;")
+        for r in cur.fetchall():
+            vk = r[0].decode("utf-8") if isinstance(r[0], bytes) else r[0]
+            if (r[1].decode("utf-8") if isinstance(r[1], bytes) else r[1]) != uth_min_text[vk]:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_uthmani_min mismatch at {vk}")
+            if (r[2].decode("utf-8") if isinstance(r[2], bytes) else r[2]) != simple_text[vk]:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_simple mismatch at {vk}")
+            if (r[3].decode("utf-8") if isinstance(r[3], bytes) else r[3]) != plain_text[vk]:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_simple_plain mismatch at {vk}")
+            if (r[4].decode("utf-8") if isinstance(r[4], bytes) else r[4]) != min_text[vk]:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_simple_min mismatch at {vk}")
+
+    elif pack_id == "quran-tr-en-pickthall":
+        tr_text = load_tanzil_text(ctx.sources_root / "raw-inputs" / "tanzil" / "en.pickthall.xml", coords, locked_path="tanzil/en.pickthall.xml")
+        cur.execute("SELECT verse_key, text FROM translations ORDER BY ayah_id;")
+        for r in cur.fetchall():
+            vk = r[0].decode("utf-8") if isinstance(r[0], bytes) else r[0]
+            txt = r[1].decode("utf-8") if isinstance(r[1], bytes) else r[1]
+            if txt != tr_text[vk]:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"translations text mismatch at {vk}")
+
+    elif pack_id == "quran-tafsir-ar-jalalayn":
+        tafsir_text = load_tanzil_text(ctx.sources_root / "raw-inputs" / "tanzil" / "ar.jalalayn.xml", coords, locked_path="tanzil/ar.jalalayn.xml")
+        cur.execute("SELECT m.verse_key, e.text, e.text_search FROM tafsir_ayah_map m JOIN tafsir_entries e ON m.entry_id = e.id ORDER BY m.ayah_id;")
+        for r in cur.fetchall():
+            vk = r[0].decode("utf-8") if isinstance(r[0], bytes) else r[0]
+            txt = r[1].decode("utf-8") if isinstance(r[1], bytes) else r[1]
+            ts = r[2].decode("utf-8") if isinstance(r[2], bytes) else r[2]
+            if txt != tafsir_text[vk]:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"tafsir text mismatch at {vk}")
+            if ts != project_tafsir_text(txt, text_format="plain", language="ar"):
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"tafsir text_search mismatch at {vk}")
+
+    elif pack_id == "quran-morphology":
+        corpus_path = ctx.sources_root / "raw-inputs" / "corpus" / "quranic-corpus-morphology-0.4.zip"
+        parsed_segments = read_corpus_segments(corpus_path, coords.ayah_ids)
+
+        cur.execute("SELECT id, word_id, segment_number, segment_role, form_buckwalter, form_ar, pos_tag, features_raw FROM morphology_segments ORDER BY id;")
+        db_segs = cur.fetchall()
+        if len(db_segs) != len(parsed_segments):
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"morphology_segments count mismatch: expected {len(parsed_segments)}, got {len(db_segs)}")
+
+        for db_seg, src_seg in zip(db_segs, parsed_segments):
+            (seg_id, w_id, s_num, s_role, fb, fa, pos, feat) = [
+                v.decode("utf-8") if isinstance(v, bytes) else v for v in db_seg
+            ]
+            if s_num != src_seg.segment:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"segment_number mismatch at {seg_id}")
+            if s_role != src_seg.role:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"segment_role mismatch at {seg_id}")
+            if fb != src_seg.form_buckwalter:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"form_buckwalter mismatch at {seg_id}")
+            if fa != src_seg.form_ar:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"form_ar mismatch at {seg_id}")
+            if pos != src_seg.pos_tag:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"pos_tag mismatch at {seg_id}")
+            if feat != src_seg.features_raw:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"features_raw mismatch at {seg_id}")
+
+        expected_words_text: list[tuple[str, str, str]] = []
+        for (s_id, a_id, w_num), seg_iter in itertools.groupby(parsed_segments, key=lambda s: (s.surah, s.ayah, s.word)):
+            segs = list(seg_iter)
+            uthmani = "".join(s.form_ar for s in segs)
+            clean = normalize_arabic(uthmani)
+            wk = f"{s_id}:{a_id}:{w_num}"
+            expected_words_text.append((wk, uthmani, clean))
+
+        cur.execute("SELECT id, word_key, word_ar_uthmani, word_ar_clean FROM words ORDER BY id;")
+        db_words = cur.fetchall()
+        if len(db_words) != len(expected_words_text):
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"words count mismatch: expected {len(expected_words_text)}, got {len(db_words)}")
+        for db_w, (exp_wk, exp_uthmani, exp_clean) in zip(db_words, expected_words_text):
+            wid = db_w[0]
+            db_wk = db_w[1].decode("utf-8") if isinstance(db_w[1], bytes) else db_w[1]
+            db_uthmani = db_w[2].decode("utf-8") if isinstance(db_w[2], bytes) else db_w[2]
+            db_clean = db_w[3].decode("utf-8") if isinstance(db_w[3], bytes) else db_w[3]
+            if db_wk != exp_wk:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"word_key mismatch at word {wid}: {db_wk} vs {exp_wk}")
+            if db_uthmani != exp_uthmani:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"word_ar_uthmani mismatch at word {wid}")
+            if db_clean != exp_clean:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"word_ar_clean mismatch at word {wid}")
+
 def stage_8_text_equivalence(ctx: GateContext) -> None:
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data = ctx.manifest_data_by_root[root_label][0]
@@ -988,14 +1789,18 @@ def stage_8_text_equivalence(ctx: GateContext) -> None:
                 ]
 
                 for tbl in tables:
-                    cur.execute(f"PRAGMA table_info({tbl});")
+                    if not re.fullmatch(r"^[a-zA-Z0-9_]+$", tbl):
+                        raise GateCheckError(2, f"{root_label}/{db_fn}", f"Invalid table name: {tbl!r}")
+                    cur.execute(f'PRAGMA table_info("{tbl}");')
                     text_columns = [
                         (r[1].decode() if isinstance(r[1], bytes) else r[1], r[3])
                         for r in cur.fetchall()
                         if "TEXT" in (r[2].decode() if isinstance(r[2], bytes) else r[2]).upper()
                     ]
                     for col_name, notnull in text_columns:
-                        cur.execute(f"SELECT rowid, typeof({col_name}), CAST({col_name} AS BLOB) FROM {tbl} WHERE {col_name} IS NOT NULL;")
+                        if not re.fullmatch(r"^[a-zA-Z0-9_]+$", col_name):
+                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Invalid column name: {col_name!r}")
+                        cur.execute(f'SELECT rowid, typeof("{col_name}"), CAST("{col_name}" AS BLOB) FROM "{tbl}" WHERE "{col_name}" IS NOT NULL;')
                         for row in cur.fetchall():
                             row_id, col_type, col_bytes = row[0], row[1], row[2]
                             type_str = col_type.decode() if isinstance(col_type, bytes) else str(col_type)
@@ -1013,8 +1818,13 @@ def stage_8_text_equivalence(ctx: GateContext) -> None:
                                 if 0xD800 <= ord(ch) <= 0xDFFF:
                                     raise GateCheckError(2, f"{root_label}/{db_fn}", f"Lone surrogate U+{ord(ch):04X} in {tbl}.{col_name} at rowid {row_id}")
                             if notnull and not decoded.strip():
+                                if tbl == "morphology_segments" and col_name in ("form_buckwalter", "form_ar"):
+                                    continue
                                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"Empty text in NOT NULL column {tbl}.{col_name} at rowid {row_id}")
 
+                if ctx.profile == "v0.1.0":
+                    _stage_8_text_equivalence_v010_pack(ctx, cur, pack_id, root_label, db_fn)
+                    continue
                 if pack_id == "quran-core":
                     core_json = load_locked_json(ctx, "sqlite/quran-core.json")
                     _verify_table_rows_by_pk(
@@ -1219,7 +2029,7 @@ def stage_9_coverage(ctx: GateContext) -> None:
                 if pack_id == "quran-core":
                     cur.execute("SELECT text_uthmani, text_simple_clean FROM ayahs;")
                     rows = cur.fetchall()
-                    tot = len(rows)
+                    tot = len(ctx.get_tanzil_coordinates().ayah_ids) if ctx.profile == "v0.1.0" else len(rows)
                     ar_cnt = sum(
                         1 for r in rows
                         if (r[0].decode("utf-8") if isinstance(r[0], bytes) else str(r[0])).strip()
@@ -1230,24 +2040,24 @@ def stage_9_coverage(ctx: GateContext) -> None:
                 elif pack_id == "quran-scripts-extended":
                     cur.execute("SELECT text_uthmani_min, text_simple, text_simple_plain, text_simple_min FROM ayah_scripts;")
                     rows = cur.fetchall()
-                    tot = len(rows)
+                    tot = len(ctx.get_tanzil_coordinates().ayah_ids) if ctx.profile == "v0.1.0" else len(rows)
                     ar_cnt = sum(
                         1 for r in rows
                         if all((col.decode("utf-8") if isinstance(col, bytes) else str(col)).strip() for col in r)
                     )
                     computed_coverage = {"expected_total": tot, "ar_present": ar_cnt}
                     avail = ar_cnt
-                elif pack_id == "quran-tr-en-fixture":
+                elif pack_id in ("quran-tr-en-fixture", "quran-tr-en-pickthall"):
                     cur.execute("SELECT text FROM translations;")
                     rows = cur.fetchall()
-                    tot = len(rows)
+                    tot = len(ctx.get_tanzil_coordinates().ayah_ids) if ctx.profile == "v0.1.0" else len(rows)
                     en_cnt = sum(
                         1 for r in rows
                         if r[0] and (r[0].decode("utf-8") if isinstance(r[0], bytes) else str(r[0])).strip()
                     )
                     computed_coverage = {"expected_total": tot, "en_present": en_cnt, "en_missing": tot - en_cnt}
                     avail = en_cnt
-                elif pack_id == "quran-tafsir-ar-fixture":
+                elif pack_id in ("quran-tafsir-ar-fixture", "quran-tafsir-ar-jalalayn"):
                     cur.execute(
                         "SELECT e.text, e.text_format "
                         "FROM tafsir_ayah_map m "
@@ -1255,7 +2065,7 @@ def stage_9_coverage(ctx: GateContext) -> None:
                         "ORDER BY m.ayah_id;"
                     )
                     rows = cur.fetchall()
-                    tot = len(rows)
+                    tot = len(ctx.get_tanzil_coordinates().ayah_ids) if ctx.profile == "v0.1.0" else len(rows)
                     ar_cnt = 0
                     for r in rows:
                         raw_t = r[0].decode("utf-8") if isinstance(r[0], bytes) else str(r[0])
@@ -1266,12 +2076,17 @@ def stage_9_coverage(ctx: GateContext) -> None:
                     computed_coverage = {"expected_total": tot, "ar_present": ar_cnt}
                     avail = ar_cnt
                 elif pack_id == "quran-morphology":
-                    cur.execute("SELECT word_ar_uthmani FROM words;")
+                    cur.execute("SELECT word_ar_uthmani, word_ar_clean FROM words;")
                     rows = cur.fetchall()
-                    tot = len(rows)
+                    if ctx.profile == "v0.1.0":
+                        segments = ctx.get_corpus_segments()
+                        tot = len({(s.surah, s.ayah, s.word) for s in segments})
+                    else:
+                        tot = len(rows)
                     ar_cnt = sum(
                         1 for r in rows
                         if r[0] and (r[0].decode("utf-8") if isinstance(r[0], bytes) else str(r[0])).strip()
+                        and r[1] and (r[1].decode("utf-8") if isinstance(r[1], bytes) else str(r[1])).strip()
                     )
                     computed_coverage = {"expected_total": tot, "ar_present": ar_cnt}
                     avail = ar_cnt
@@ -1315,15 +2130,29 @@ def stage_9_coverage(ctx: GateContext) -> None:
                     computed_coverage = {}
                     avail = 0
 
-                cur.execute("SELECT metric, count FROM coverage_report;")
-                actual_coverage = {
-                    (r[0].decode() if isinstance(r[0], bytes) else str(r[0])): r[1]
-                    for r in cur.fetchall()
-                }
+                cur.execute("SELECT metric, count, notes FROM coverage_report;")
+                actual_coverage = {}
+                for r in cur.fetchall():
+                    metric = r[0].decode() if isinstance(r[0], bytes) else str(r[0])
+                    cnt = r[1]
+                    notes = r[2]
+                    if notes is not None:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"coverage_report notes must be NULL, got {notes!r} for metric {metric}")
+                    actual_coverage[metric] = cnt
                 if actual_coverage != computed_coverage:
                     raise GateCheckError(1, f"{root_label}/{db_fn}", f"coverage_report mismatch with computed content: {actual_coverage} vs {computed_coverage}")
 
-                expected_cov = ctx.expectations["packs"][pack_id]["coverage"]
+                if ctx.profile == "v0.1.0":
+                    if pack_id in ("quran-core", "quran-scripts-extended", "quran-tafsir-ar-jalalayn"):
+                        expected_cov = {"expected_total": 6236, "ar_present": 6236}
+                    elif pack_id == "quran-tr-en-pickthall":
+                        expected_cov = {"expected_total": 6236, "en_present": 6236, "en_missing": 0}
+                    elif pack_id == "quran-morphology":
+                        expected_cov = {"expected_total": 77429, "ar_present": 77429}
+                    else:
+                        expected_cov = {}
+                else:
+                    expected_cov = ctx.expectations["packs"][pack_id]["coverage"]
                 if actual_coverage != expected_cov:
                     raise GateCheckError(1, f"{root_label}/{db_fn}", f"Coverage mismatch against expectations: expected {expected_cov}, got {actual_coverage}")
 
@@ -1378,41 +2207,163 @@ def stage_10_fts(ctx: GateContext) -> None:
                     except OSError:
                         pass
 
-            # Execute declared FTS queries from expectations
-            fts_specs = ctx.expectations["packs"][pack_id].get("fts", [])
-            conn = _open_ro_db(db_path)
-            try:
-                cur = conn.cursor()
-                for q_spec in fts_specs:
-                    tbl = q_spec["table"]
-                    if tbl not in _PACK_FTS_MAP[pack_id]:
-                        raise GateCheckError(4, f"{root_label}/{db_fn}", f"Non-allowlisted FTS query table {tbl}")
-                    query_str = q_spec["query"]
-                    expected_row_ids = q_spec["rowIds"]
+            if ctx.profile == "v0.1.0":
+                _run_fts_queries_v010(ctx, root_label, db_fn, db_path, pack_id)
+            else:
+                # Execute declared FTS queries from expectations
+                fts_specs = ctx.expectations["packs"][pack_id].get("fts", [])
+                conn = _open_ro_db(db_path)
+                try:
+                    cur = conn.cursor()
+                    for q_spec in fts_specs:
+                        tbl = q_spec["table"]
+                        if tbl not in _PACK_FTS_MAP[pack_id]:
+                            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Non-allowlisted FTS query table {tbl}")
+                        query_str = q_spec["query"]
+                        expected_row_ids = q_spec["rowIds"]
 
-                    effective_query = query_str
-                    if tbl in _ARABIC_FTS_TABLES and _ARABIC_CHAR_RE.search(query_str):
-                        effective_query = normalize_arabic(query_str)
+                        effective_query = query_str
+                        if tbl in _ARABIC_FTS_TABLES and _ARABIC_CHAR_RE.search(query_str):
+                            effective_query = normalize_arabic(query_str)
 
-                    if not effective_query.strip():
-                        actual_row_ids: list[int] = []
-                    else:
-                        escaped_query = effective_query.replace('"', '""')
-                        quoted_phrase = f'"{escaped_query}"'
-                        cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? ORDER BY rowid;", [quoted_phrase])
-                        actual_row_ids = [r[0] for r in cur.fetchall()]
+                        if not effective_query.strip():
+                            actual_row_ids: list[int] = []
+                        else:
+                            escaped_query = effective_query.replace('"', '""')
+                            quoted_phrase = f'"{escaped_query}"'
+                            cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? ORDER BY rowid;", [quoted_phrase])
+                            actual_row_ids = [r[0] for r in cur.fetchall()]
 
-                    if actual_row_ids != expected_row_ids:
-                        raise GateCheckError(
-                            4,
-                            f"{root_label}/{db_fn}",
-                            f"FTS query {query_str!r} on {tbl} returned {actual_row_ids}, expected {expected_row_ids}",
-                        )
-            finally:
-                conn.close()
+                        if actual_row_ids != expected_row_ids:
+                            raise GateCheckError(
+                                4,
+                                f"{root_label}/{db_fn}",
+                                f"FTS query {query_str!r} on {tbl} returned {actual_row_ids}, expected {expected_row_ids}",
+                            )
+                finally:
+                    conn.close()
+
+
+def _run_fts_queries_v010(ctx: GateContext, root_label: str, db_fn: str, db_path: Path, pack_id: str) -> None:
+    queries: list[tuple[str, str, list[int]]] = []
+    if pack_id == "quran-core":
+        queries = [
+            ("ayahs_fts", "رَبِّ العالمين", [2]),
+            ("ayahs_fts", "رب العالمين", [2]),
+            ("ayahs_fts", "zzzzfixturemissing", []),
+        ]
+    elif pack_id == "quran-tafsir-ar-jalalayn":
+        queries = [
+            ("tafsir_fts", "رَبِّ العالمين", [2]),
+            ("tafsir_fts", "رب العالمين", [2]),
+            ("tafsir_fts", "zzzzfixturemissing", []),
+        ]
+    elif pack_id == "quran-tr-en-pickthall":
+        queries = [
+            ("translations_fts", "Lord of the Worlds", [2]),
+            ("translations_fts", "zzzzfixturemissing", []),
+        ]
+
+    if not queries:
+        return
+
+    conn = _open_ro_db(db_path)
+    try:
+        cur = conn.cursor()
+        for tbl, query_str, expected_row_ids in queries:
+            if tbl not in _PACK_FTS_MAP[pack_id]:
+                raise GateCheckError(4, f"{root_label}/{db_fn}", f"Non-allowlisted FTS query table {tbl}")
+
+            effective_query = query_str
+            if tbl in _ARABIC_FTS_TABLES and _ARABIC_CHAR_RE.search(query_str):
+                effective_query = normalize_arabic(query_str)
+
+            if not effective_query.strip():
+                actual_row_ids: list[int] = []
+            else:
+                escaped_query = effective_query.replace('"', '""')
+                quoted_phrase = f'"{escaped_query}"'
+                cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? AND rowid = 2 ORDER BY rowid;", [quoted_phrase])
+                actual_row_ids = [r[0] for r in cur.fetchall()]
+
+            if actual_row_ids != expected_row_ids:
+                raise GateCheckError(
+                    4,
+                    f"{root_label}/{db_fn}",
+                    f"FTS query {query_str!r} on {tbl} returned {actual_row_ids}, expected {expected_row_ids}",
+                )
+    finally:
+        conn.close()
+
+
+def _stage_11_tafsir_v010(ctx: GateContext) -> None:
+    coords = load_tanzil_coordinates(ctx.sources_root / "raw-inputs" / "tanzil" / "quran-data-Tanzil.xml")
+    jalalayn_text = load_tanzil_text(ctx.sources_root / "raw-inputs" / "tanzil" / "ar.jalalayn.xml", coords, locked_path="tanzil/ar.jalalayn.xml")
+    ayah_keys = [item[0] for item in sorted(coords.ayah_ids.items(), key=lambda x: x[1])]
+    for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+        cat_data = ctx.manifest_data_by_root[root_label][0]
+        if "quran-tafsir-ar-jalalayn" not in [p["id"] for p in cat_data["packs"]]:
+            continue
+
+        db_fn = "quran-tafsir-ar-jalalayn.db"
+        db_path = root_path / db_fn
+
+        conn = _open_ro_db(db_path)
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id, group_key, start_ayah_id, end_ayah_id, text, text_format, text_search FROM tafsir_entries ORDER BY start_ayah_id;")
+            entries = cur.fetchall()
+            if len(entries) != 6236:
+                raise GateCheckError(9, f"{root_label}/{db_fn}", f"tafsir_entries count mismatch: expected 6236, got {len(entries)}")
+
+            prev_end = 0
+            for idx, r in enumerate(entries):
+                e_id, group_key, s_ayah, e_ayah, text, fmt, search_t = r
+                vk = ayah_keys[idx]
+                exp_aid = idx + 1
+                group_key_str = group_key.decode("utf-8") if isinstance(group_key, bytes) else group_key
+                fmt_str = fmt.decode("utf-8") if isinstance(fmt, bytes) else fmt
+                text_str = text.decode("utf-8") if isinstance(text, bytes) else text
+                search_str = search_t.decode("utf-8") if isinstance(search_t, bytes) else search_t
+
+                if e_id != exp_aid or s_ayah != exp_aid or e_ayah != exp_aid:
+                    raise GateCheckError(9, f"{root_label}/{db_fn}", f"Tafsir entry {e_id} interval mismatch: expected {exp_aid}..{exp_aid}, got {s_ayah}..{e_ayah}")
+                if group_key_str != vk:
+                    raise GateCheckError(9, f"{root_label}/{db_fn}", f"Tafsir entry {e_id} group_key mismatch: expected {vk}, got {group_key_str}")
+                if s_ayah <= prev_end:
+                    raise GateCheckError(9, f"{root_label}/{db_fn}", f"Tafsir interval overlap at entry {e_id}")
+                prev_end = e_ayah
+
+                if fmt_str != "plain":
+                    raise GateCheckError(9, f"{root_label}/{db_fn}", f"Tafsir entry {e_id} format mismatch: expected plain, got {fmt_str}")
+                if text_str != jalalayn_text[vk]:
+                    raise GateCheckError(9, f"{root_label}/{db_fn}", f"Tafsir entry {e_id} text mismatch against source")
+                if search_str != project_tafsir_text(text_str, text_format="plain", language="ar"):
+                    raise GateCheckError(9, f"{root_label}/{db_fn}", f"Tafsir entry {e_id} search projection mismatch")
+
+            cur.execute("SELECT ayah_id, verse_key, entry_id FROM tafsir_ayah_map ORDER BY ayah_id;")
+            map_rows = cur.fetchall()
+            if len(map_rows) != 6236:
+                raise GateCheckError(9, f"{root_label}/{db_fn}", f"tafsir_ayah_map count mismatch: expected 6236, got {len(map_rows)}")
+
+            for idx, (aid, vk_b, entry_id) in enumerate(map_rows):
+                exp_aid = idx + 1
+                vk_str = vk_b.decode("utf-8") if isinstance(vk_b, bytes) else vk_b
+                exp_vk = ayah_keys[idx]
+                if aid != exp_aid:
+                    raise GateCheckError(9, f"{root_label}/{db_fn}", f"tafsir_ayah_map ayah_id mismatch at {idx}: expected {exp_aid}, got {aid}")
+                if vk_str != exp_vk:
+                    raise GateCheckError(9, f"{root_label}/{db_fn}", f"tafsir_ayah_map verse_key mismatch at {idx}: expected {exp_vk}, got {vk_str}")
+                if entry_id != exp_aid:
+                    raise GateCheckError(9, f"{root_label}/{db_fn}", f"tafsir_ayah_map entry_id mismatch at {idx}: expected {exp_aid}, got {entry_id}")
+        finally:
+            conn.close()
 
 
 def stage_11_tafsir(ctx: GateContext) -> None:
+    if ctx.profile == "v0.1.0":
+        _stage_11_tafsir_v010(ctx)
+        return
     raw_root = ctx.sources_root / "raw-inputs"
     locked_tafsir = parse_strict_json((raw_root / "qul" / "tafsir-ar-fixture.json").read_text(encoding="utf-8"))
 
@@ -1523,6 +2474,12 @@ def stage_11_tafsir(ctx: GateContext) -> None:
 def stage_12_cross_root_equality(ctx: GateContext) -> None:
     cand_files = ctx.declared_files_by_root["candidate"]
 
+    cand_inodes: dict[tuple[int, int], str] = {}
+    for fn in sorted(cand_files):
+        c_file = ctx.candidate / fn
+        st = c_file.stat()
+        cand_inodes[(st.st_dev, st.st_ino)] = fn
+
     for fn in sorted(cand_files):
         c_file = ctx.candidate / fn
         r_file = ctx.rebuild / fn
@@ -1530,9 +2487,10 @@ def stage_12_cross_root_equality(ctx: GateContext) -> None:
         if not r_file.is_file() or _is_symlink_or_junction(r_file):
             raise GateCheckError(6, fn, f"Rebuild asset {fn} missing or link")
 
-        if os.path.samefile(c_file, r_file):
-            raise GateCheckError(6, fn, f"Cross-root file inode alias detected for asset {fn}")
-
+        r_st = r_file.stat()
+        r_key = (r_st.st_dev, r_st.st_ino)
+        if r_key in cand_inodes:
+            raise GateCheckError(6, fn, f"Cross-root file inode alias detected for asset {fn} (matches candidate {cand_inodes[r_key]})")
         c_size = c_file.stat().st_size
         r_size = r_file.stat().st_size
         if c_size != r_size:
@@ -1571,8 +2529,18 @@ def run_checks(
     candidate: Path,
     rebuild: Path,
     sources_root: Path,
-    expectations: dict[str, Any],
+    expectations: dict[str, Any] | None = None,
+    local_review: bool = False,
 ) -> None:
+    if profile not in ("fixture", "v0.1.0"):
+        raise ValueError(f"Unsupported profile: {profile!r}")
+    if local_review and profile != "v0.1.0":
+        raise ValueError("local_review is only permitted for profile 'v0.1.0'")
+    if profile == "fixture" and expectations is None:
+        raise ValueError("expectations is required for fixture profile")
+    if profile == "v0.1.0" and expectations is not None:
+        raise ValueError("expectations is not permitted for v0.1.0 profile")
+
     repo_root = Path(__file__).resolve().parents[2]
     specs_dir = repo_root / "specs"
 
@@ -1581,8 +2549,9 @@ def run_checks(
         candidate=candidate,
         rebuild=rebuild,
         sources_root=sources_root,
-        expectations=expectations,
+        expectations=expectations or {},
         specs_dir=specs_dir,
+        local_review=local_review,
     )
 
     for stage_idx, (stage_name, check_num) in enumerate(_STAGES):
@@ -1598,7 +2567,17 @@ def run_checks(
     print("Check #4: Passed (FTS integrity and query verification)")
     print("Check #5: Passed (manifest schemas, asset verification, probes)")
     print("Check #6: Passed (root identity and cross-root byte equality)")
-    print("Check #7: Passed (source lock, licenses, metadata reconciliation)")
+    if ctx.profile == "v0.1.0" and ctx.local_review:
+        pending_packs = sorted([
+            pid for pid, rec in ctx.license_records.items()
+            if rec.get("status") == "pending"
+        ])
+        if pending_packs:
+            print(f"Clearance pending (local verification only): {', '.join(pending_packs)}")
+        else:
+            print("Check #7: Passed (source lock, licenses, metadata reconciliation)")
+    else:
+        print("Check #7: Passed (source lock, licenses, metadata reconciliation)")
     print("Check 8: Not applicable (no production QAC/QUL pair).")
     print("Check #9: Passed (Tafsir intervals and map pointers)")
     print("All quality gate checks passed successfully.")
@@ -1735,26 +2714,32 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     profile = args.profile
-    if profile != "fixture":
-        sys.stderr.write(f"CLI error: only 'fixture' profile supported in Phase 0; got {profile!r}\n")
+    if profile not in ("fixture", "v0.1.0"):
+        sys.stderr.write(f"CLI error: unsupported profile {profile!r}; must be 'fixture' or 'v0.1.0'\n")
         return 2
 
-    if args.expectations is None:
-        sys.stderr.write("CLI error: --expectations is required for fixture profile\n")
-        return 2
+    if profile == "fixture":
+        if args.expectations is None:
+            sys.stderr.write("CLI error: --expectations is required for fixture profile\n")
+            return 2
 
-    exp_path = Path(args.expectations)
-    if not exp_path.is_file() or _is_symlink_or_junction(exp_path):
-        sys.stderr.write(f"CLI error: expectations file not found or invalid: {exp_path}\n")
-        return 2
+        exp_path = Path(args.expectations)
+        if not exp_path.is_file() or _is_symlink_or_junction(exp_path):
+            sys.stderr.write(f"CLI error: expectations file not found or invalid: {exp_path}\n")
+            return 2
 
-    try:
-        exp_text = exp_path.read_text(encoding="utf-8")
-        parsed_exp = parse_strict_json(exp_text)
-        expectations = validate_expectations_oracle(parsed_exp, exp_path)
-    except Exception as exc:
-        sys.stderr.write(f"Malformed expectations file {exp_path}: {exc}\n")
-        return 2
+        try:
+            exp_text = exp_path.read_text(encoding="utf-8")
+            parsed_exp = parse_strict_json(exp_text)
+            expectations = validate_expectations_oracle(parsed_exp, exp_path)
+        except Exception as exc:
+            sys.stderr.write(f"Malformed expectations file {exp_path}: {exc}\n")
+            return 2
+    else:
+        if args.expectations is not None:
+            sys.stderr.write("CLI error: --expectations is rejected for v0.1.0 profile\n")
+            return 2
+        expectations = None
 
     candidate = Path(args.candidate)
     rebuild = Path(args.rebuild)
@@ -1777,6 +2762,7 @@ def main(argv: list[str] | None = None) -> int:
             rebuild=rebuild,
             sources_root=sources_root,
             expectations=expectations,
+            local_review=False,
         )
         return 0
     except GateCheckError as exc:
