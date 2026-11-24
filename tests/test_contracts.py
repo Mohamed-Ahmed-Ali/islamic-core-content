@@ -345,13 +345,13 @@ class TestSqlContracts:
             """INSERT INTO hadiths (
                 id, book_id, chapter_id, hadith_number, urn,
                 arabic_full, english_full, text_split_mode,
-                arabic_sanad, arabic_matn, arabic_matn_clean,
+                arabic_sanad, arabic_matn, arabic_matn_clean, arabic_full_clean,
                 english_narrator, english_body, grade_ar, grade_en,
                 reference_json, is_ar_missing, is_en_missing
             ) VALUES (
                 1, 1, 1, '1a', NULL,
                 'رَبِّ', NULL, 'unsplit_raw',
-                NULL, NULL, NULL,
+                NULL, NULL, NULL, 'رب',
                 NULL, NULL, NULL, NULL,
                 '{"inBook":"Book 1, Hadith 1","uscMsa":null}', 0, 1
             );"""
@@ -362,13 +362,13 @@ class TestSqlContracts:
             """INSERT INTO hadiths (
                 id, book_id, chapter_id, hadith_number, urn,
                 arabic_full, english_full, text_split_mode,
-                arabic_sanad, arabic_matn, arabic_matn_clean,
+                arabic_sanad, arabic_matn, arabic_matn_clean, arabic_full_clean,
                 english_narrator, english_body, grade_ar, grade_en,
                 reference_json, is_ar_missing, is_en_missing
             ) VALUES (
                 2, 1, 1, '1b', NULL,
                 'إسناد رَبِّ', 'mercy', 'source_verified',
-                'إسناد', 'رَبِّ', 'رب',
+                'إسناد', 'رَبِّ', 'رب', NULL,
                 NULL, 'mercy', NULL, NULL,
                 '{"inBook":null,"uscMsa":null}', 0, 0
             );"""
@@ -400,6 +400,11 @@ class TestSqlContracts:
         assert len(res_en) == 1
         assert res_en[0][0] == 2
 
+        # Secondary FTS5: indexes normalized unsplit Arabic (arabic_full_clean)
+        conn.execute("INSERT INTO hadiths_full_fts(hadiths_full_fts) VALUES('rebuild');")
+        res_full_ar = conn.execute("SELECT rowid FROM hadiths_full_fts WHERE hadiths_full_fts MATCH 'رب';").fetchall()
+        assert len(res_full_ar) == 1
+        assert res_full_ar[0][0] == 1  # Row 1 indexed in hadiths_full_fts, not row 2
 
 # ---------------------------------------------------------------------------
 # JSON Schema Contract Tests

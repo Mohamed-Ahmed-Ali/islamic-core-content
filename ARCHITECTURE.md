@@ -239,7 +239,7 @@ Count distinct members of the expected population. `en_missing = expected_total 
 
 ## 6. Canonical Database Schemas (v1)
 
-Apply `specs/sql/common_meta.sql` then exactly one checked-in pack schema to a fresh file; do not reproduce DDL in application code. `ayahs_fts`, `translations_fts`, `tafsir_fts`, `word_translations_fts`, and `hadiths_fts` are the only FTS tables, in their respective packs. Extended scripts and morphology declare none. Set `pack_meta.fts5_enabled` to `'true'` and catalog `requiresFts5` to `true` exactly for packs with a declared FTS table. Check #3 verifies both against the actual schema; #4 verifies indexed contents.
+Apply `specs/sql/common_meta.sql` then exactly one checked-in pack schema to a fresh file; do not reproduce DDL in application code. `ayahs_fts`, `translations_fts`, `tafsir_fts`, `word_translations_fts`, `hadiths_fts`, and `hadiths_full_fts` are the only FTS tables, in their respective packs. Extended scripts and morphology declare none. Set `pack_meta.fts5_enabled` to `'true'` and catalog `requiresFts5` to `true` exactly for packs with a declared FTS table. Check #3 verifies both against the actual schema; #4 verifies indexed contents.
 
 **Arabic FTS rule.** For the Arabic projections below and Arabic query literals, delete code points U+0610–U+061A, U+064B–U+065F, U+0670, U+06D6–U+06DC, U+06DF–U+06E4, U+06E7–U+06E8, and U+06EA–U+06ED. Do not fold Arabic letters, apply Unicode decomposition, or modify persisted source text. Normalize user literals **before** quoting as FTS phrases (double embedded `"`) and binding to `MATCH`; empty normalization yields no search. SQLite's [`unicode61 remove_diacritics`](https://www.sqlite.org/fts5.html#unicode61_tokenizer) handles Latin-script diacritics, not Arabic. `رَبِّ` and `رب` must produce the same expected row IDs; the fixture's `كتب` query must return none.
 
@@ -547,6 +547,7 @@ CREATE TABLE hadiths (
     arabic_sanad      TEXT,
     arabic_matn       TEXT,
     arabic_matn_clean TEXT, -- §6 Arabic projection of verified Matn only
+    arabic_full_clean TEXT, -- §6 Arabic projection of normalized unsplit text only
     english_narrator  TEXT,
     english_body      TEXT,
 
@@ -573,7 +574,21 @@ CREATE VIRTUAL TABLE hadiths_fts USING fts5(
     tokenize='unicode61'
 );
 
+-- Secondary FTS5:
+-- Indexes normalized unsplit Arabic ONLY for rows where text_split_mode == 'unsplit_raw'.
+-- Rows with source_verified leave arabic_full_clean NULL.
+CREATE VIRTUAL TABLE hadiths_full_fts USING fts5(
+    arabic_full_clean,
+    content='hadiths',
+    content_rowid='id',
+    tokenize='unicode61'
+);
+
 ```
+
+**Dual search surfaces policy:**
+- **Primary `hadiths_fts`:** Indexes verified Matn only (`arabic_matn_clean`) and English body (`english_body`). Unsplit rows leave `arabic_matn_clean` NULL, preventing unverified Sanad chains from polluting Matn search results.
+- **Secondary `hadiths_full_fts`:** Indexes normalized unsplit Arabic (`arabic_full_clean`) for rows where `text_split_mode == 'unsplit_raw'`. Rows with `source_verified` leave `arabic_full_clean` NULL.
 
 ---
 

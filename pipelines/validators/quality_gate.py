@@ -170,11 +170,11 @@ _PACK_FTS_MAP: dict[str, tuple[str, ...]] = {
     "quran-tafsir-ar-jalalayn": ("tafsir_fts",),
     "quran-morphology": (),
     "quran-wbw-en": ("word_translations_fts",),
-    "hadith-fixture": ("hadiths_fts",),
+    "hadith-fixture": ("hadiths_fts", "hadiths_full_fts"),
 }
 
 _ARABIC_CHAR_RE = re.compile(r"[\u0600-\u06FF]")
-_ARABIC_FTS_TABLES = frozenset({"ayahs_fts", "tafsir_fts", "hadiths_fts"})
+_ARABIC_FTS_TABLES = frozenset({"ayahs_fts", "tafsir_fts", "hadiths_fts", "hadiths_full_fts"})
 _EXPECTED_COVERAGE_METRICS: dict[str, set[str]] = {
     "quran-core": {"expected_total", "ar_present"},
     "quran-scripts-extended": {"expected_total", "ar_present"},

@@ -29,6 +29,7 @@ CREATE TABLE hadiths (
     arabic_sanad      TEXT,
     arabic_matn       TEXT,
     arabic_matn_clean TEXT, -- §6 Arabic projection of verified Matn only
+    arabic_full_clean TEXT, -- §6 Arabic projection of normalized unsplit text only
     english_narrator  TEXT,
     english_body      TEXT,
 
@@ -50,6 +51,16 @@ CREATE INDEX idx_hadiths_number ON hadiths(hadith_number);
 CREATE VIRTUAL TABLE hadiths_fts USING fts5(
     arabic_matn_clean,
     english_body,
+    content='hadiths',
+    content_rowid='id',
+    tokenize='unicode61'
+);
+
+-- Secondary FTS5:
+-- Indexes normalized unsplit Arabic ONLY for rows where text_split_mode == 'unsplit_raw'.
+-- Rows with source_verified leave arabic_full_clean NULL.
+CREATE VIRTUAL TABLE hadiths_full_fts USING fts5(
+    arabic_full_clean,
     content='hadiths',
     content_rowid='id',
     tokenize='unicode61'

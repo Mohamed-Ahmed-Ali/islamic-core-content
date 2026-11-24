@@ -142,7 +142,7 @@ FIXED_SQLITE_PACKS: tuple[SqlitePackSpec, ...] = (
         completeness="partial",
         required=False,
         requires_fts5=True,
-        fts_tables=("hadiths_fts",),
+        fts_tables=("hadiths_fts", "hadiths_full_fts"),
         source_rel_path="hadith/fixture.json",
         coverage_report={"expected_total": (2, None), "ar_present": (2, None), "en_present": (1, None), "en_missing": (1, None)},
         catalog_coverage={"expected": 2, "available": 1},
@@ -209,7 +209,7 @@ CHAPTER_COLUMNS = ("id", "book_id", "number", "title_ar", "title_en")
 HADITH_COLUMNS = (
     "id", "book_id", "chapter_id", "hadith_number", "urn", "arabic_full",
     "english_full", "text_split_mode", "arabic_sanad", "arabic_matn",
-    "arabic_matn_clean", "english_narrator", "english_body", "grade_ar",
+    "arabic_matn_clean", "arabic_full_clean", "english_narrator", "english_body", "grade_ar",
     "grade_en", "reference_json", "is_ar_missing", "is_en_missing",
 )
 
@@ -618,10 +618,11 @@ def populate_pack_tables(
             ar_sanad = h["arabicSanad"]
             ar_matn = h["arabicMatn"]
             ar_matn_clean = normalize_arabic(ar_matn) if (split_mode == "source_verified" and ar_matn) else None
+            ar_full_clean = normalize_arabic(h["arabicFull"]) if (split_mode == "unsplit_raw" and h["arabicFull"]) else None
             hadith_rows.append((
                 h["id"], h["bookId"], h["chapterId"], h["hadithNumber"], h["urn"],
                 h["arabicFull"], h["englishFull"], split_mode, ar_sanad, ar_matn,
-                ar_matn_clean, h["englishNarrator"], h["englishBody"], h["gradeAr"],
+                ar_matn_clean, ar_full_clean, h["englishNarrator"], h["englishBody"], h["gradeAr"],
                 h["gradeEn"], ref_json, is_ar_missing, is_en_missing,
             ))
         insert_table_rows(conn, "books", BOOK_COLUMNS, book_rows)

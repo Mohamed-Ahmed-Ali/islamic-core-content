@@ -78,7 +78,11 @@
         {"table": "hadiths_fts", "query": "رب", "rowIds": [2]},
         {"table": "hadiths_fts", "query": "كتب", "rowIds": []},
         {"table": "hadiths_fts", "query": "mercy", "rowIds": [2]},
-        {"table": "hadiths_fts", "query": "absent", "rowIds": []}
+        {"table": "hadiths_fts", "query": "absent", "rowIds": []},
+        {"table": "hadiths_full_fts", "query": "رَبِّ", "rowIds": [1]},
+        {"table": "hadiths_full_fts", "query": "رب", "rowIds": [1]},
+        {"table": "hadiths_full_fts", "query": "كتب", "rowIds": []},
+        {"table": "hadiths_full_fts", "query": "absent", "rowIds": []}
       ]
     },
     "audio-adhan-core": {}
