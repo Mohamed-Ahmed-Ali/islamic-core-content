@@ -75,7 +75,23 @@ On a fresh release runner, download from the authorized locked HTTPS URLs except
 
 ### v1 Hadith input (`raw-inputs/hadith/{book}.json`)
 
-One JSON object per collection with exactly three arrays: `books` (nonempty), `chapters` (may be empty), and `hadiths` (nonempty). All fields in the example are required; positive integers identify rows within each array. `chapterId` is a positive integer or `null`. `urn` and all textual values except `books[].number` and `hadiths[].hadithNumber` are nonempty strings or `null`; those two numbers are required nonempty strings, not integers. `reference` is a required object with exactly `inBook` and `uscMsa` (each nullable nonempty string). `textSplitMode` is the enum `unsplit_raw` or `source_verified`, never null. Both split fields must be null for `unsplit_raw`; `source_verified` requires nonblank `arabicFull`, `arabicSanad` and `arabicMatn` and evidence of the upstream split. No heuristic or regex splitting. Full text, English components, grades and both reference values are retained unchanged.
+The exact nine collection slugs for Phase 2 are `bukhari`, `muslim`, `nasai`, `abudawud`, `tirmidhi`, `ibnmajah`, `malik`, `darimi`, and `ahmad`. Other collections (including Nawawi and Riyad us-Salihin) are explicitly deferred and kept out of this phase.
+
+Accepted pinned source and coverage acceptance oracle for the nine collections:
+
+| Slug | Rows | Arabic | English | Missing English | Both | Pinned Source / Edition |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `bukhari` | 7277 | 7277 | 7276 | 1 | 7276 | AhmedBaset/hadith-json Sunnah.com snapshot |
+| `muslim` | 7459 | 7459 | 7458 | 1 | 7458 | AhmedBaset/hadith-json Sunnah.com snapshot |
+| `nasai` | 5768 | 5768 | 5768 | 0 | 5768 | AhmedBaset/hadith-json Sunnah.com snapshot |
+| `abudawud` | 5276 | 5276 | 5276 | 0 | 5276 | AhmedBaset/hadith-json Sunnah.com snapshot |
+| `tirmidhi` | 4053 | 4053 | 4052 | 1 | 4052 | AhmedBaset/hadith-json Sunnah.com snapshot |
+| `ibnmajah` | 4345 | 4345 | 4345 | 0 | 4345 | AhmedBaset/hadith-json Sunnah.com snapshot |
+| `malik` | 1985 | 1985 | 1985 | 0 | 1985 | AhmedBaset/hadith-json local composite (repaired text) |
+| `darimi` | 3406 | 3406 | 0 | 3406 | 0 | AhmedBaset/hadith-json Sunnah.com snapshot (Arabic only) |
+| `ahmad` | 26363 | 26363 | 0 | 26363 | 0 | Open-Hadith-Data diacritized Arabic CSV (Arabic only) |
+
+One JSON object per collection with exactly three arrays: `books` (nonempty), `chapters` (may be empty), and `hadiths` (nonempty). All fields in the example are required; positive integers identify rows within each array. `chapterId` is a positive integer or `null`. `urn` and all textual values except `books[].number` and `hadiths[].hadithNumber` are nonempty strings or `null`; those two numbers are required nonempty strings, not integers. `reference` is a required object with exactly `inBook` and `uscMsa` (each nullable nonempty string). `textSplitMode` is the enum `unsplit_raw` or `source_verified`, never null. All current sources default strictly to `textSplitMode = "unsplit_raw"` with both split fields `null`, unless independently evidenced with splits evidence. `source_verified` requires nonblank `arabicFull`, `arabicSanad` and `arabicMatn` and separately supplied split evidence. No heuristic or regex splitting. Full text, English components, grades and both reference values are retained unchanged.
 
 IDs (`id`, `bookId`, and any non-null `chapterId`) must fit SQLite signed 64-bit positive integers: `1`–`9223372036854775807`. Reject `9223372036854775808` in schema validation.
 
@@ -183,18 +199,14 @@ Unless qualified, builder section references below point to `ARCHITECTURE.md`. I
 
 ---
 
-### Phase 2: Milestone `v0.2.0` — Bilingual Hadith Packs
-**Objective:** Fix the missing English fields from prior builds and ship audited, bilingual Hadith SQLite databases.
-* [ ] **Task 2.1 (Ingestion & Audit):** Validate each collection's `raw-inputs/hadith/{book}.json` against `specs/inputs/hadith-input.schema.json`; handle `{book}.splits.json` separately as the §2 evidence contract.
-* [ ] **Task 2.2 (Builder):** Implement `build_hadith_book.py`:
-  * Preserve `arabic_full`, `english_full`, `english_narrator`, `english_body`, grades, and structured references.
-  * Strictly enforce `text_split_mode` (`source_verified` vs. `unsplit_raw`); zero heuristic or regex splitting.
-  * Compute `is_ar_missing`, `is_en_missing`, and exact `coverage_report` metrics.
-  * Populate `hadiths_fts` strictly per the Matn/English indexing policy.
-* [ ] **Task 2.3 (License Verification):** Document exact source URL, edition, translator, and Sunnah.com redistribution terms in `sources/licenses/hadith-{book}.json`.
-* [ ] **Task 2.4 (Pilot & Rollout):** Ship `hadith-bukhari.db` and `hadith-muslim.db` first, then expand to remaining Kutub al-Sittah (`abudawud`, `tirmidhi`, `nasai`, `ibnmajah`) and Nawawi/Riyad us-Salihin.
+### Phase 2: Milestone `v0.2.0` — Bilingual Hadith Packs (Local Only)
+**Objective:** Ingest audited bilingual and Arabic Hadith datasets, support dual search surfaces (`hadiths_fts` and `hadiths_full_fts`), and produce deterministic SQLite packs for nine collections: `bukhari`, `muslim`, `nasai`, `abudawud`, `tirmidhi`, `ibnmajah`, `malik`, `darimi`, and `ahmad`. Collections outside these nine (such as Nawawi and Riyad us-Salihin) are explicitly deferred and kept out. Deliver local pinned Linux double builds and local gate clearance; no tag, release workflow, publication, or external distribution clearance.
+* [x] **Task 2.1 (Ingestion & Audit):** Validate each collection's canonical input against `specs/inputs/hadith-input.schema.json` and strict semantic rules in `pipelines/common/hadith_input.py`; validate `{book}.splits.json` as external split evidence; implement `pipelines/common/stage_hadith_inputs.py` to stage pinned sources; stage pilot inputs (`bukhari` and `muslim`) into `raw-inputs/hadith/`.
+* [ ] **Task 2.2 (Builder):** Implement `pipelines/builders/build_hadith_book.py` producing deterministic SQLite databases with dual FTS surfaces (`hadiths_fts` indexing verified Matn / English body; `hadiths_full_fts` indexing normalized unsplit Arabic); enforce `textSplitMode = "unsplit_raw"` unless verified; compute `is_ar_missing`, `is_en_missing`, and exact coverage metrics.
+* [ ] **Task 2.3 (License Verification):** Record pending license metadata in `sources/licenses/hadith-{slug}.json` for all nine packs, document source provenance and redistribution restrictions, and lock all nine canonical inputs in `sources/manifest.lock.json`.
+* [ ] **Task 2.4 (Pilot & Rollout):** Implement local quality gate profiles `--profile hadith-pilot` and `--profile hadith-local` in `pipelines/validators/quality_gate.py`; verify pilot (`bukhari` and `muslim`) first; upon passing, stage remaining seven books (`nasai`, `abudawud`, `tirmidhi`, `ibnmajah`, `malik`, `darimi`, `ahmad`), build all nine packs in candidate and rebuild roots, and prove bit-for-bit determinism, FTS token coverage, and schema integrity.
 
-**Definition of Done:** Every Hadith pack accurately reports Arabic and English coverage, passes FTS5 tests, never falsely declares `"completeness": "complete"` when translations are missing, and passes bit-for-bit determinism.
+**Definition of Done:** Local-only double builds across candidate and rebuild roots pass bit-for-bit identity; every Hadith pack matches the exact acceptance oracle counts for Arabic, English, missing English, and bilingual coverage; passes FTS5 token coverage checks on both search surfaces; never declares `"completeness": "complete"` when translations are missing (except Malik where all 1,985 records have both languages); and passes strict quality gate verification.
 
 ---
 
