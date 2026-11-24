@@ -39,6 +39,7 @@ from pipelines.builders.build_audio_adhan import NAME_MAP, RECITER_MAP, SLUG_MAP
 from pipelines.builders.build_quran_morphology import read_corpus_segments
 from pipelines.release.release_packs import MORPHOLOGY_SOURCE_ARCHIVE_MEMBERS, load_release_descriptor
 from pipelines.toolchain.check_runtime import verify_runtime
+from pipelines.common.pack_sources import load_sqlite_source_metadata
 
 
 class GateCheckError(Exception):
@@ -186,6 +187,70 @@ _EXPECTED_COVERAGE_METRICS: dict[str, set[str]] = {
     "quran-wbw-en": {"expected_total", "ar_present", "en_present", "en_missing"},
     "hadith-fixture": {"expected_total", "ar_present", "en_present", "en_missing"},
 }
+_HADITH_LOCAL_ORACLE: dict[str, dict[str, Any]] = {
+    "bukhari": {
+        "id": 1,
+        "ar_literal": "حَدَّثَنَا الْحُمَيْدِيُّ",
+        "en_literal": "I heard",
+        "expected_counts": (7277, 7277, 7276, 1, 7276),
+    },
+    "muslim": {
+        "id": 7278,
+        "ar_literal": "حَدَّثَنِي أَبُو خَيْثَمَةَ",
+        "en_literal": "Should it so happen",
+        "expected_counts": (7459, 7459, 7458, 1, 7458),
+    },
+    "nasai": {
+        "id": 14737,
+        "ar_literal": "أَخْبَرَنَا قُتَيْبَةُ",
+        "en_literal": "When any one of",
+        "expected_counts": (5768, 5768, 5768, 0, 5768),
+    },
+    "abudawud": {
+        "id": 20505,
+        "ar_literal": "حَدَّثَنَا عَبْدُ اللَّهِ",
+        "en_literal": "When the Prophet",
+        "expected_counts": (5276, 5276, 5276, 0, 5276),
+    },
+    "tirmidhi": {
+        "id": 25781,
+        "ar_literal": "حَدَّثَنَا قُتَيْبَةُ",
+        "en_literal": "the Prophet said",
+        "expected_counts": (4053, 4053, 4052, 1, 4052),
+    },
+    "ibnmajah": {
+        "id": 29834,
+        "ar_literal": "حَدَّثَنَا أَبُو بَكْرِ",
+        "en_literal": "The Messenger of Allah",
+        "expected_counts": (4345, 4345, 4345, 0, 4345),
+    },
+    "malik": {
+        "id": 34179,
+        "ar_literal": "قَالَ حَدَّثَنِي يَحْيَى",
+        "en_literal": "He said",
+        "expected_counts": (1985, 1985, 1985, 0, 1985),
+    },
+    "darimi": {
+        "id": 37538,
+        "ar_literal": "أَخْبَرَنَا عَلِيُّ",
+        "en_literal": "none",
+        "expected_counts": (3406, 3406, 0, 3406, 0),
+    },
+    "ahmad": {
+        "id": 1,
+        "ar_literal": "عَبْدُ اللَّهِ بْنُ نُمَيْرٍ",
+        "en_literal": "none",
+        "expected_counts": (26363, 26363, 0, 26363, 0),
+    },
+}
+
+_HADITH_PILOT_PACK_IDS: tuple[str, ...] = ("hadith-bukhari", "hadith-muslim")
+_HADITH_ALL_PACK_IDS: tuple[str, ...] = tuple(f"hadith-{_slug}" for _slug in _HADITH_LOCAL_ORACLE.keys())
+
+for _slug in _HADITH_LOCAL_ORACLE:
+    _PACK_SCHEMA_MAP[f"hadith-{_slug}"] = "hadith_book.v1.sql"
+    _PACK_FTS_MAP[f"hadith-{_slug}"] = ("hadiths_fts", "hadiths_full_fts")
+    _EXPECTED_COVERAGE_METRICS[f"hadith-{_slug}"] = {"expected_total", "ar_present", "en_present", "en_missing"}
 
 _strict_type_checker = Draft202012Validator.TYPE_CHECKER.redefine(
     "integer",
@@ -688,6 +753,8 @@ def stage_1_root_identity(ctx: GateContext) -> None:
 
 
 def stage_2_manifest_text(ctx: GateContext) -> None:
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        return
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         ctx.raw_manifest_bytes[root_label] = {}
         parsed_manifests: dict[str, dict[str, Any]] = {}
@@ -929,6 +996,51 @@ def _validate_v010_manifests(
             else:
                 raise GateCheckError(5, f"{root_label}/{fn}", f"Unknown companion asset {fn} in descriptor")
 def stage_3_manifest_schemas_inventory(ctx: GateContext) -> None:
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        expected_pids = _HADITH_PILOT_PACK_IDS if ctx.profile == "hadith-pilot" else _HADITH_ALL_PACK_IDS
+        expected_dbs = sorted([f"{pid}.db" for pid in expected_pids])
+
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            actual_files: set[str] = set()
+            try:
+                with os.scandir(root_path) as it:
+                    for entry in it:
+                        name = entry.name
+                        if name.startswith("."):
+                            raise GateCheckError(5, f"{root_label}/{name}", "Dotfile not permitted in flat DB root")
+                        if _is_symlink_or_junction(entry.path):
+                            raise GateCheckError(5, f"{root_label}/{name}", "Symlink or junction not permitted in flat DB root")
+                        if entry.is_dir(follow_symlinks=False):
+                            raise GateCheckError(5, f"{root_label}/{name}", "Subdirectory not permitted in flat DB root")
+                        for suffix in ("-wal", "-shm", "-journal"):
+                            if name.endswith(suffix):
+                                raise GateCheckError(5, f"{root_label}/{name}", f"Sidecar file {suffix} not permitted")
+                        if not entry.is_file(follow_symlinks=False):
+                            raise GateCheckError(5, f"{root_label}/{name}", "Non-regular file not permitted in flat DB root")
+                        actual_files.add(name)
+            except GateCheckError:
+                raise
+            except Exception as exc:
+                raise GateCheckError(5, root_label, f"Error scanning directory: {exc}") from exc
+
+            expected_set = set(expected_dbs)
+            if actual_files != expected_set:
+                missing = sorted(expected_set - actual_files)
+                if missing:
+                    raise GateCheckError(5, f"{root_label}/{missing[0]}", f"Expected asset missing: {missing[0]}")
+                extra = sorted(actual_files - expected_set)
+                if extra:
+                    raise GateCheckError(5, f"{root_label}/{extra[0]}", f"Unexpected asset in root: {extra[0]}")
+
+            for db_fn in expected_dbs:
+                db_p = root_path / db_fn
+                st = db_p.stat()
+                if not (0 < st.st_size < 2 * 1024 * 1024 * 1024):
+                    raise GateCheckError(5, f"{root_label}/{db_fn}", f"File size {st.st_size} not strictly between 0 and 2 GiB")
+
+            ctx.declared_files_by_root[root_label] = set(expected_dbs)
+        return
+
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data, audio_data = ctx.manifest_data_by_root[root_label]
         cat_bytes = ctx.raw_manifest_bytes[root_label]["catalog.json"]
@@ -1135,6 +1247,60 @@ def stage_4_source_lock_clearance(ctx: GateContext) -> None:
         ctx.registry_data = reg
         ctx.license_records = lics
         return
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        sources_dir = ctx.sources_root / "sources"
+        raw_root = ctx.sources_root / "raw-inputs"
+        reg_path = sources_dir / "registry.json"
+        lock_path = sources_dir / "manifest.lock.json"
+
+        if not raw_root.is_dir() or _is_symlink_or_junction(raw_root):
+            raise GateCheckError(7, "raw-inputs", "raw-inputs root missing or link")
+        if not reg_path.is_file() or _is_symlink_or_junction(reg_path):
+            raise GateCheckError(7, "sources/registry.json", "sources/registry.json missing or link")
+        if not lock_path.is_file() or _is_symlink_or_junction(lock_path):
+            raise GateCheckError(7, "sources/manifest.lock.json", "sources/manifest.lock.json missing or link")
+
+        book_slugs = ("bukhari", "muslim") if ctx.profile == "hadith-pilot" else tuple(_HADITH_LOCAL_ORACLE.keys())
+        expected_pids = [f"hadith-{slug}" for slug in book_slugs]
+
+        all_entries: list[LockEntry] = []
+        for pid in expected_pids:
+            try:
+                p_entries = verify_lock(reg_path, raw_root, lock_path, pack_id=pid)
+                all_entries.extend(p_entries)
+            except Exception as exc:
+                raise GateCheckError(7, f"lock verification for {pid}", f"Lock verification failed: {exc}") from exc
+
+        ctx.lock_entries = tuple(all_entries)
+
+        try:
+            registry_data = parse_strict_json(reg_path.read_text(encoding="utf-8"))
+            ctx.registry_data = registry_data
+        except Exception as exc:
+            raise GateCheckError(7, "sources/registry.json", f"Failed parsing registry: {exc}") from exc
+
+        for pid in expected_pids:
+            rel_lic = f"sources/licenses/{pid}.json"
+            slug = pid.removeprefix("hadith-")
+            pack_entries = tuple(e for e in all_entries if e.path.startswith(f"hadith/{slug}."))
+            try:
+                load_sqlite_source_metadata(ctx.sources_root, pid, pack_entries)
+            except Exception as exc:
+                raise GateCheckError(7, rel_lic, f"License validation failed: {exc}") from exc
+
+            lic_file = ctx.sources_root / rel_lic
+            try:
+                lic_data = parse_strict_json(lic_file.read_text(encoding="utf-8"))
+            except Exception as exc:
+                raise GateCheckError(7, rel_lic, f"Failed parsing license JSON: {exc}") from exc
+
+            if lic_data.get("status") != "pending":
+                raise GateCheckError(7, rel_lic, f"License status must be 'pending', got {lic_data.get('status')!r}")
+
+            ctx.license_records[pid] = lic_data
+
+        print(f"Clearance pending (local verification only): {', '.join(expected_pids)}")
+        return
     sources_dir = ctx.sources_root / "sources"
     raw_root = ctx.sources_root / "raw-inputs"
     reg_path = sources_dir / "registry.json"
@@ -1259,8 +1425,113 @@ def _open_ro_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
+def _verify_single_db_schema_and_integrity(
+    ctx: GateContext,
+    root_label: str,
+    db_fn: str,
+    db_path: Path,
+    pack_id: str,
+    common_meta_sql: str,
+) -> None:
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = db_path.parent / (db_path.name + suffix)
+        if sidecar.exists() or _is_symlink_or_junction(sidecar):
+            raise GateCheckError(3, f"{root_label}/{db_fn}", f"SQLite sidecar file exists: {sidecar.name}")
+
+    conn = _open_ro_db(db_path)
+    try:
+        cur = conn.cursor()
+        res_int = cur.execute("PRAGMA integrity_check;").fetchall()
+        if res_int != [("ok",)] and res_int != [(b"ok",)]:
+            raise GateCheckError(3, f"{root_label}/{db_fn}", f"integrity_check failed: {res_int}")
+
+        res_fk = cur.execute("PRAGMA foreign_key_check;").fetchall()
+        if res_fk:
+            raise GateCheckError(3, f"{root_label}/{db_fn}", f"foreign_key_check failed with violations: {res_fk}")
+
+        res_enc = cur.execute("PRAGMA encoding;").fetchone()
+        if res_enc[0] not in ("UTF-8", b"UTF-8"):
+            raise GateCheckError(3, f"{root_label}/{db_fn}", f"encoding must be UTF-8, got {res_enc[0]}")
+
+        res_ps = cur.execute("PRAGMA page_size;").fetchone()
+        if res_ps[0] != 4096:
+            raise GateCheckError(3, f"{root_label}/{db_fn}", f"page_size must be 4096, got {res_ps[0]}")
+
+        res_uv = cur.execute("PRAGMA user_version;").fetchone()
+        if res_uv[0] != 1:
+            raise GateCheckError(3, f"{root_label}/{db_fn}", f"user_version must be 1, got {res_uv[0]}")
+
+        res_jm = cur.execute("PRAGMA journal_mode;").fetchone()
+        if str(res_jm[0]).lower() not in ("delete", "b'delete'"):
+            raise GateCheckError(3, f"{root_label}/{db_fn}", f"journal_mode must be DELETE, got {res_jm[0]}")
+
+        # Reference schema comparison
+        schema_fn = _PACK_SCHEMA_MAP.get(pack_id)
+        if not schema_fn:
+            raise GateCheckError(3, f"{root_label}/{db_fn}", f"No schema DDL mapped for {pack_id}")
+        schema_sql = (ctx.specs_sql_dir / schema_fn).read_text(encoding="utf-8")
+
+        ref_conn = sqlite3.connect(":memory:")
+        try:
+            ref_conn.execute("PRAGMA foreign_keys = ON;")
+            ref_conn.executescript(common_meta_sql)
+            ref_conn.executescript(schema_sql)
+            ref_conn.execute("ANALYZE;")
+            ref_cur = ref_conn.cursor()
+
+            cur.execute("PRAGMA table_list;")
+            actual_shadow = {r[1] for r in cur.fetchall() if len(r) > 2 and r[2] == "shadow"}
+            ref_cur.execute("PRAGMA table_list;")
+            ref_shadow = {r[1] for r in ref_cur.fetchall() if len(r) > 2 and r[2] == "shadow"}
+
+            cur.execute("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name;")
+            actual_entities = [
+                (str(r[0]), str(r[1]), str(r[2]), (str(r[3]) if r[3] is not None else None))
+                for r in cur.fetchall()
+                if str(r[1]) not in actual_shadow and str(r[2]) not in actual_shadow
+            ]
+
+            ref_cur.execute("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name;")
+            ref_entities = [
+                (str(r[0]), str(r[1]), str(r[2]), (str(r[3]) if r[3] is not None else None))
+                for r in ref_cur.fetchall()
+                if str(r[1]) not in ref_shadow and str(r[2]) not in ref_shadow
+            ]
+
+            if actual_entities != ref_entities:
+                raise GateCheckError(3, f"{root_label}/{db_fn}", f"Schema entities mismatch: actual {actual_entities} vs ref {ref_entities}")
+
+            for _, tbl_name, _, _ in [e for e in ref_entities if e[0] == "table"]:
+                cur.execute(f"PRAGMA table_info({tbl_name});")
+                act_ti = [(r[1], str(r[2]).upper(), r[3], r[4], r[5]) for r in cur.fetchall()]
+                ref_cur.execute(f"PRAGMA table_info({tbl_name});")
+                ref_ti = [(r[1], str(r[2]).upper(), r[3], r[4], r[5]) for r in ref_cur.fetchall()]
+                if act_ti != ref_ti:
+                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"table_info mismatch on {tbl_name}")
+
+                cur.execute(f"PRAGMA foreign_key_list({tbl_name});")
+                act_fk = cur.fetchall()
+                ref_cur.execute(f"PRAGMA foreign_key_list({tbl_name});")
+                ref_fk = ref_cur.fetchall()
+                if act_fk != ref_fk:
+                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"foreign_key_list mismatch on {tbl_name}")
+        finally:
+            ref_conn.close()
+    finally:
+        conn.close()
+
+
 def stage_5_sqlite_schema_integrity(ctx: GateContext) -> None:
     common_meta_sql = (ctx.specs_sql_dir / "common_meta.sql").read_text(encoding="utf-8")
+
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for db_fn in sorted(ctx.declared_files_by_root[root_label]):
+                pack_id = db_fn.removesuffix(".db")
+                _verify_single_db_schema_and_integrity(
+                    ctx, root_label, db_fn, root_path / db_fn, pack_id, common_meta_sql
+                )
+        return
 
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data = ctx.manifest_data_by_root[root_label][0]
@@ -1269,98 +1540,84 @@ def stage_5_sqlite_schema_integrity(ctx: GateContext) -> None:
         for p in sqlite_packs:
             pack_id = p["id"]
             db_fn = f"{pack_id}.db"
-            db_path = root_path / db_fn
-
-            for suffix in ("-wal", "-shm", "-journal"):
-                sidecar = db_path.parent / (db_path.name + suffix)
-                if sidecar.exists() or _is_symlink_or_junction(sidecar):
-                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"SQLite sidecar file exists: {sidecar.name}")
-
-            conn = _open_ro_db(db_path)
-            try:
-                cur = conn.cursor()
-                res_int = cur.execute("PRAGMA integrity_check;").fetchall()
-                if res_int != [("ok",)] and res_int != [(b"ok",)]:
-                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"integrity_check failed: {res_int}")
-
-                res_fk = cur.execute("PRAGMA foreign_key_check;").fetchall()
-                if res_fk:
-                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"foreign_key_check failed with violations: {res_fk}")
-
-                res_enc = cur.execute("PRAGMA encoding;").fetchone()
-                if res_enc[0] not in ("UTF-8", b"UTF-8"):
-                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"encoding must be UTF-8, got {res_enc[0]}")
-
-                res_ps = cur.execute("PRAGMA page_size;").fetchone()
-                if res_ps[0] != 4096:
-                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"page_size must be 4096, got {res_ps[0]}")
-
-                res_uv = cur.execute("PRAGMA user_version;").fetchone()
-                if res_uv[0] != 1:
-                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"user_version must be 1, got {res_uv[0]}")
-
-                res_jm = cur.execute("PRAGMA journal_mode;").fetchone()
-                if str(res_jm[0]).lower() not in ("delete", "b'delete'"):
-                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"journal_mode must be DELETE, got {res_jm[0]}")
-
-                # Reference schema comparison
-                schema_fn = _PACK_SCHEMA_MAP.get(pack_id)
-                if not schema_fn:
-                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"No schema DDL mapped for {pack_id}")
-                schema_sql = (ctx.specs_sql_dir / schema_fn).read_text(encoding="utf-8")
-
-                ref_conn = sqlite3.connect(":memory:")
-                try:
-                    ref_conn.execute("PRAGMA foreign_keys = ON;")
-                    ref_conn.executescript(common_meta_sql)
-                    ref_conn.executescript(schema_sql)
-                    ref_conn.execute("ANALYZE;")
-                    ref_cur = ref_conn.cursor()
-
-                    cur.execute("PRAGMA table_list;")
-                    actual_shadow = {r[1] for r in cur.fetchall() if len(r) > 2 and r[2] == "shadow"}
-                    ref_cur.execute("PRAGMA table_list;")
-                    ref_shadow = {r[1] for r in ref_cur.fetchall() if len(r) > 2 and r[2] == "shadow"}
-
-                    cur.execute("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name;")
-                    actual_entities = [
-                        (str(r[0]), str(r[1]), str(r[2]), (str(r[3]) if r[3] is not None else None))
-                        for r in cur.fetchall()
-                        if str(r[1]) not in actual_shadow and str(r[2]) not in actual_shadow
-                    ]
-
-                    ref_cur.execute("SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type, name;")
-                    ref_entities = [
-                        (str(r[0]), str(r[1]), str(r[2]), (str(r[3]) if r[3] is not None else None))
-                        for r in ref_cur.fetchall()
-                        if str(r[1]) not in ref_shadow and str(r[2]) not in ref_shadow
-                    ]
-
-                    if actual_entities != ref_entities:
-                        raise GateCheckError(3, f"{root_label}/{db_fn}", f"Schema entities mismatch: actual {actual_entities} vs ref {ref_entities}")
-
-                    for _, tbl_name, _, _ in [e for e in ref_entities if e[0] == "table"]:
-                        cur.execute(f"PRAGMA table_info({tbl_name});")
-                        act_ti = [(r[1], str(r[2]).upper(), r[3], r[4], r[5]) for r in cur.fetchall()]
-                        ref_cur.execute(f"PRAGMA table_info({tbl_name});")
-                        ref_ti = [(r[1], str(r[2]).upper(), r[3], r[4], r[5]) for r in ref_cur.fetchall()]
-                        if act_ti != ref_ti:
-                            raise GateCheckError(3, f"{root_label}/{db_fn}", f"table_info mismatch on {tbl_name}")
-
-                        cur.execute(f"PRAGMA foreign_key_list({tbl_name});")
-                        act_fk = cur.fetchall()
-                        ref_cur.execute(f"PRAGMA foreign_key_list({tbl_name});")
-                        ref_fk = ref_cur.fetchall()
-                        if act_fk != ref_fk:
-                            raise GateCheckError(3, f"{root_label}/{db_fn}", f"foreign_key_list mismatch on {tbl_name}")
-                finally:
-                    ref_conn.close()
-            finally:
-                conn.close()
-
+            _verify_single_db_schema_and_integrity(
+                ctx, root_label, db_fn, root_path / db_fn, pack_id, common_meta_sql
+            )
 
 def stage_6_sqlite_metadata(ctx: GateContext) -> None:
     sources_dir = ctx.sources_root / "sources"
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for db_fn in sorted(ctx.declared_files_by_root[root_label]):
+                pack_id = db_fn.removesuffix(".db")
+                slug = pack_id.removeprefix("hadith-")
+                db_path = root_path / db_fn
+                conn = _open_ro_db(db_path)
+                conn.text_factory = bytes
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT key, value FROM pack_meta;")
+                    meta_dict: dict[str, str] = {}
+                    for r0, r1 in cur.fetchall():
+                        try:
+                            k_str = r0.decode("utf-8") if isinstance(r0, bytes) else str(r0)
+                            v_str = r1.decode("utf-8") if isinstance(r1, bytes) else str(r1)
+                        except UnicodeDecodeError as exc:
+                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Malformed UTF-8 in pack_meta: {exc}") from exc
+                        if "\ufffd" in k_str or "\ufffd" in v_str:
+                            raise GateCheckError(2, f"{root_label}/{db_fn}", "pack_meta contains replacement character U+FFFD")
+                        for s in (k_str, v_str):
+                            for ch in s:
+                                if 0xD800 <= ord(ch) <= 0xDFFF:
+                                    raise GateCheckError(2, f"{root_label}/{db_fn}", f"Lone surrogate in pack_meta U+{ord(ch):04X}")
+                        meta_dict[k_str] = v_str
+
+                    cur.execute("SELECT metric, count, notes FROM coverage_report ORDER BY metric;")
+                    cov_rows = cur.fetchall()
+                    cov_dict: dict[str, int] = {}
+                    for m_b, cnt_b, notes_b in cov_rows:
+                        m_str = m_b.decode("utf-8") if isinstance(m_b, bytes) else str(m_b)
+                        if notes_b is not None:
+                            raise GateCheckError(7, f"{root_label}/{db_fn}", f"coverage_report notes must be NULL for {m_str}")
+                        cov_dict[m_str] = cnt_b
+
+                    expected_metrics = {"expected_total", "ar_present", "en_present", "en_missing"}
+                    if set(cov_dict.keys()) != expected_metrics:
+                        raise GateCheckError(7, f"{root_label}/{db_fn}", f"coverage_report metrics mismatch: {sorted(cov_dict.keys())}")
+
+                    en_missing = cov_dict["en_missing"]
+                    ar_missing = cov_dict["expected_total"] - cov_dict["ar_present"]
+                    expected_completeness = "complete" if (en_missing == 0 and ar_missing == 0) else "partial"
+
+                    if meta_dict.get("pack_id") != pack_id:
+                        raise GateCheckError(7, f"{root_label}/{db_fn}", f"pack_meta pack_id mismatch: {meta_dict.get('pack_id')}")
+                    if meta_dict.get("pack_version") != "0.2.0":
+                        raise GateCheckError(7, f"{root_label}/{db_fn}", f"pack_meta pack_version must be '0.2.0', got {meta_dict.get('pack_version')}")
+                    if meta_dict.get("schema_version") != "1":
+                        raise GateCheckError(7, f"{root_label}/{db_fn}", f"pack_meta schema_version must be '1', got {meta_dict.get('schema_version')}")
+                    if meta_dict.get("fts5_enabled") != "true":
+                        raise GateCheckError(7, f"{root_label}/{db_fn}", f"pack_meta fts5_enabled must be 'true'")
+                    if meta_dict.get("matn_split_verified") != "false":
+                        raise GateCheckError(7, f"{root_label}/{db_fn}", f"pack_meta matn_split_verified must be 'false', got {meta_dict.get('matn_split_verified')}")
+                    if meta_dict.get("completeness") != expected_completeness:
+                        raise GateCheckError(7, f"{root_label}/{db_fn}", f"pack_meta completeness mismatch: expected {expected_completeness}, got {meta_dict.get('completeness')}")
+
+                    pack_entries = tuple(e for e in ctx.lock_entries if e.path.startswith(f"hadith/{slug}."))
+                    exp_src_meta = load_sqlite_source_metadata(
+                        ctx.sources_root,
+                        pack_id,
+                        pack_entries,
+                        pack_version="0.2.0",
+                        completeness=expected_completeness,
+                        fts5_enabled=True,
+                    )
+                    for k in ("license_spdx", "source_name", "source_url", "source_version", "build_input_sha256"):
+                        if meta_dict.get(k) != exp_src_meta[k]:
+                            raise GateCheckError(7, f"{root_label}/{db_fn}", f"pack_meta {k} mismatch: actual {meta_dict.get(k)!r} vs source {exp_src_meta[k]!r}")
+                finally:
+                    conn.close()
+        return
+
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data = ctx.manifest_data_by_root[root_label][0]
         sqlite_packs = sorted([p for p in cat_data["packs"] if p["format"] == "sqlite"], key=lambda p: p["id"])
@@ -1583,6 +1840,30 @@ def stage_7_record_keys(ctx: GateContext) -> None:
     if ctx.profile == "v0.1.0":
         _stage_7_record_keys_v010(ctx)
         return
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for db_fn in sorted(ctx.declared_files_by_root[root_label]):
+                pack_id = db_fn.removesuffix(".db")
+                slug = pack_id.removeprefix("hadith-")
+                db_path = root_path / db_fn
+                conn = _open_ro_db(db_path)
+                try:
+                    cur = conn.cursor()
+                    act_keys = _fetch_validated_keys(cur, "hadiths", "id", "id", root_label, db_fn, is_int=True)
+                    hadith_json = load_locked_json(ctx, f"hadith/{slug}.json")
+                    locked_pks = sorted([r["id"] for r in hadith_json["hadiths"]])
+                    if act_keys != locked_pks:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"Primary key mismatch in hadiths: {len(act_keys)} vs {len(locked_pks)}")
+                    act_books = _fetch_validated_keys(cur, "books", "id", "id", root_label, db_fn, is_int=True)
+                    if act_books != sorted([b["id"] for b in hadith_json["books"]]):
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", "books keys mismatch in hadith")
+                    act_chaps = _fetch_validated_keys(cur, "chapters", "id", "id", root_label, db_fn, is_int=True)
+                    if act_chaps != sorted([c["id"] for c in hadith_json.get("chapters", [])]):
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", "chapters keys mismatch in hadith")
+                finally:
+                    conn.close()
+        return
+
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data = ctx.manifest_data_by_root[root_label][0]
         sqlite_packs = sorted([p for p in cat_data["packs"] if p["format"] == "sqlite"], key=lambda p: p["id"])
@@ -1764,7 +2045,182 @@ def _stage_8_text_equivalence_v010_pack(
             if db_clean != exp_clean:
                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"word_ar_clean mismatch at word {wid}")
 
+def _verify_hadith_db_text_and_source(
+    ctx: GateContext,
+    cur: sqlite3.Cursor,
+    pack_id: str,
+    slug: str,
+    root_label: str,
+    db_fn: str,
+) -> None:
+    hadith_json = load_locked_json(ctx, f"hadith/{slug}.json")
+    hadith_schema_data = parse_strict_json(ctx.hadith_input_schema_path.read_text(encoding="utf-8"))
+    v = StrictDraft202012Validator(hadith_schema_data)
+    try:
+        v.validate(hadith_json)
+    except ValidationError as exc:
+        raise GateCheckError(2, f"raw-inputs/hadith/{slug}.json", f"Hadith input schema validation failed: {exc.message}")
+
+    h_ids = [h["id"] for h in hadith_json["hadiths"]]
+    if len(h_ids) != len(set(h_ids)):
+        raise GateCheckError(2, f"raw-inputs/hadith/{slug}.json", "Duplicate hadith ID in raw input")
+    h_urns = [h["urn"] for h in hadith_json["hadiths"] if h.get("urn") is not None]
+    if len(h_urns) != len(set(h_urns)):
+        raise GateCheckError(2, f"raw-inputs/hadith/{slug}.json", "Duplicate hadith URN in raw input")
+
+    chap_books = {c["id"]: c["bookId"] for c in hadith_json.get("chapters", [])}
+    for h in hadith_json["hadiths"]:
+        c_id = h.get("chapterId")
+        if c_id is not None:
+            if c_id not in chap_books or chap_books[c_id] != h["bookId"]:
+                raise GateCheckError(2, f"raw-inputs/hadith/{slug}.json", f"Hadith {h['id']} chapter {c_id} does not belong to book {h['bookId']}")
+
+    splits_path = ctx.sources_root / "raw-inputs" / "hadith" / f"{slug}.splits.json"
+    splits_data = parse_strict_json(splits_path.read_text(encoding="utf-8")) if splits_path.is_file() else {}
+
+    cur.execute(
+        "SELECT id, book_id, chapter_id, hadith_number, urn, arabic_full, english_full, "
+        "text_split_mode, arabic_sanad, arabic_matn, arabic_matn_clean, english_narrator, "
+        "english_body, grade_ar, grade_en, reference_json, is_ar_missing, is_en_missing, arabic_full_clean "
+        "FROM hadiths ORDER BY id;"
+    )
+    db_hadiths = cur.fetchall()
+    if len(db_hadiths) != len(hadith_json["hadiths"]):
+        raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith count mismatch: {len(db_hadiths)} vs {len(hadith_json['hadiths'])}")
+    sorted_raw_hadiths = sorted(hadith_json["hadiths"], key=lambda x: x["id"])
+    for db_h, raw_h in zip(db_hadiths, sorted_raw_hadiths):
+        (
+            h_id, b_id, c_id, h_num, urn, ar_full, en_full,
+            split_mode, ar_sanad, ar_matn, ar_matn_clean,
+            en_narrator, en_body, g_ar, g_en, ref_json,
+            is_ar_miss, is_en_miss, ar_full_clean
+        ) = [val.decode("utf-8") if isinstance(val, bytes) else val for val in db_h]
+
+        if h_id != raw_h["id"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith id mismatch: {h_id} vs {raw_h['id']}")
+        if b_id != raw_h["bookId"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} book_id mismatch")
+        if c_id != raw_h["chapterId"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} chapter_id mismatch")
+        if str(h_num) != str(raw_h["hadithNumber"]):
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} hadith_number mismatch")
+        if urn != raw_h["urn"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} urn mismatch")
+        if ar_full != raw_h["arabicFull"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} arabic_full mismatch")
+        if en_full != raw_h["englishFull"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} english_full mismatch")
+        if split_mode != raw_h["textSplitMode"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} text_split_mode mismatch")
+        if en_narrator != raw_h["englishNarrator"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} english_narrator mismatch")
+        if en_body != raw_h["englishBody"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} english_body mismatch")
+        if g_ar != raw_h["gradeAr"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} grade_ar mismatch")
+        if g_en != raw_h["gradeEn"]:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} grade_en mismatch")
+
+        exp_ref_json = (
+            json.dumps(raw_h["reference"], sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+            if raw_h.get("reference") is not None else None
+        )
+        if ref_json != exp_ref_json:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} reference_json mismatch")
+
+        exp_is_ar = 1 if raw_h["arabicFull"] is None else 0
+        exp_is_en = 1 if raw_h["englishFull"] is None else 0
+        if is_ar_miss != exp_is_ar:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} is_ar_missing mismatch")
+        if is_en_miss != exp_is_en:
+            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} is_en_missing mismatch")
+
+        if split_mode == "unsplit_raw":
+            if ar_sanad is not None or ar_matn is not None or ar_matn_clean is not None:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"Unsplit Hadith record {h_id} must have NULL split fields")
+            exp_clean = normalize_arabic(ar_full) if ar_full is not None else None
+            if ar_full_clean != exp_clean:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_full_clean search projection mismatch for Hadith {h_id}")
+        elif split_mode == "source_verified":
+            h_id_str = str(h_id)
+            if h_id_str not in splits_data:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"source_verified Hadith {h_id} missing split evidence in splits file")
+            split_ev = splits_data[h_id_str]
+            if not isinstance(split_ev, dict) or "sourceRef" not in split_ev:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"Invalid split evidence shape for Hadith {h_id}")
+            if ar_sanad != split_ev.get("arabicSanad") or ar_sanad != raw_h.get("arabicSanad"):
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_sanad mismatch for Hadith {h_id}")
+            if ar_matn != split_ev.get("arabicMatn") or ar_matn != raw_h.get("arabicMatn"):
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_matn mismatch for Hadith {h_id}")
+            if normalize_arabic(ar_matn) != ar_matn_clean:
+                raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_matn_clean search projection mismatch for Hadith {h_id}")
+
+    _verify_table_rows_by_pk(
+        cur, "books", ["id", "number", "name_ar", "name_en"], "id", hadith_json["books"], root_label, db_fn,
+        projections={"number": lambda r: str(r["number"]), "name_ar": lambda r: r.get("nameAr"), "name_en": lambda r: r.get("nameEn")}
+    )
+    _verify_table_rows_by_pk(
+        cur, "chapters", ["id", "book_id", "number", "title_ar", "title_en"], "id", hadith_json.get("chapters", []), root_label, db_fn,
+        projections={"book_id": lambda r: r["bookId"], "number": lambda r: str(r["number"]) if r.get("number") is not None else None, "title_ar": lambda r: r.get("titleAr"), "title_en": lambda r: r.get("titleEn")}
+    )
+
 def stage_8_text_equivalence(ctx: GateContext) -> None:
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for db_fn in sorted(ctx.declared_files_by_root[root_label]):
+                pack_id = db_fn.removesuffix(".db")
+                slug = pack_id.removeprefix("hadith-")
+                db_path = root_path / db_fn
+                conn = _open_ro_db(db_path)
+                conn.text_factory = bytes
+                try:
+                    cur = conn.cursor()
+                    cur.execute("PRAGMA table_list;")
+                    shadows = {r[1] for r in cur.fetchall() if len(r) > 2 and r[2] == "shadow"}
+                    cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                    tables = [
+                        (r[0].decode() if isinstance(r[0], bytes) else r[0])
+                        for r in cur.fetchall()
+                        if (r[0].decode() if isinstance(r[0], bytes) else r[0]) not in shadows
+                        and not (r[0].decode() if isinstance(r[0], bytes) else r[0]).endswith("_fts")
+                    ]
+                    for tbl in tables:
+                        if not re.fullmatch(r"^[a-zA-Z0-9_]+$", tbl):
+                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Invalid table name: {tbl!r}")
+                        cur.execute(f'PRAGMA table_info("{tbl}");')
+                        text_columns = [
+                            (r[1].decode() if isinstance(r[1], bytes) else r[1], r[3])
+                            for r in cur.fetchall()
+                            if "TEXT" in (r[2].decode() if isinstance(r[2], bytes) else r[2]).upper()
+                        ]
+                        for col_name, notnull in text_columns:
+                            if not re.fullmatch(r"^[a-zA-Z0-9_]+$", col_name):
+                                raise GateCheckError(2, f"{root_label}/{db_fn}", f"Invalid column name: {col_name!r}")
+                            cur.execute(f'SELECT rowid, typeof("{col_name}"), CAST("{col_name}" AS BLOB) FROM "{tbl}" WHERE "{col_name}" IS NOT NULL;')
+                            for row in cur.fetchall():
+                                row_id, col_type, col_bytes = row[0], row[1], row[2]
+                                type_str = col_type.decode() if isinstance(col_type, bytes) else str(col_type)
+                                if type_str.lower() != "text":
+                                    raise GateCheckError(2, f"{root_label}/{db_fn}", f"Non-TEXT storage class {type_str!r} in TEXT column {tbl}.{col_name} at rowid {row_id}")
+                                if col_bytes is None:
+                                    continue
+                                try:
+                                    decoded = col_bytes.decode("utf-8")
+                                except UnicodeDecodeError as exc:
+                                    raise GateCheckError(2, f"{root_label}/{db_fn}", f"Malformed UTF-8 in {tbl}.{col_name} at rowid {row_id}: {exc}") from exc
+                                if "\ufffd" in decoded or b"\xef\xbf\xbd" in col_bytes:
+                                    raise GateCheckError(2, f"{root_label}/{db_fn}", f"U+FFFD replacement character in {tbl}.{col_name} at rowid {row_id}")
+                                for ch in decoded:
+                                    if 0xD800 <= ord(ch) <= 0xDFFF:
+                                        raise GateCheckError(2, f"{root_label}/{db_fn}", f"Lone surrogate U+{ord(ch):04X} in {tbl}.{col_name} at rowid {row_id}")
+                                if notnull and not decoded.strip():
+                                    raise GateCheckError(2, f"{root_label}/{db_fn}", f"Empty text in NOT NULL column {tbl}.{col_name} at rowid {row_id}")
+
+                    _verify_hadith_db_text_and_source(ctx, cur, pack_id, slug, root_label, db_fn)
+                finally:
+                    conn.close()
+        return
+
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data = ctx.manifest_data_by_root[root_label][0]
         sqlite_packs = sorted([p for p in cat_data["packs"] if p["format"] == "sqlite"], key=lambda p: p["id"])
@@ -1904,115 +2360,59 @@ def stage_8_text_equivalence(ctx: GateContext) -> None:
                         "id", wbw_json["word_translations"], root_label, db_fn
                     )
                 elif pack_id == "hadith-fixture":
-                    hadith_json = load_locked_json(ctx, "hadith/fixture.json")
-                    hadith_schema_data = parse_strict_json(ctx.hadith_input_schema_path.read_text(encoding="utf-8"))
-                    v = StrictDraft202012Validator(hadith_schema_data)
-                    try:
-                        v.validate(hadith_json)
-                    except ValidationError as exc:
-                        raise GateCheckError(2, "raw-inputs/hadith/fixture.json", f"Hadith input schema validation failed: {exc.message}")
-
-                    h_ids = [h["id"] for h in hadith_json["hadiths"]]
-                    if len(h_ids) != len(set(h_ids)):
-                        raise GateCheckError(2, "raw-inputs/hadith/fixture.json", "Duplicate hadith ID in raw input")
-                    h_urns = [h["urn"] for h in hadith_json["hadiths"] if h.get("urn") is not None]
-                    if len(h_urns) != len(set(h_urns)):
-                        raise GateCheckError(2, "raw-inputs/hadith/fixture.json", "Duplicate hadith URN in raw input")
-
-                    chap_books = {c["id"]: c["bookId"] for c in hadith_json.get("chapters", [])}
-                    for h in hadith_json["hadiths"]:
-                        c_id = h.get("chapterId")
-                        if c_id is not None:
-                            if c_id not in chap_books or chap_books[c_id] != h["bookId"]:
-                                raise GateCheckError(2, "raw-inputs/hadith/fixture.json", f"Hadith {h['id']} chapter {c_id} does not belong to book {h['bookId']}")
-
-                    splits_path = ctx.sources_root / "raw-inputs" / "hadith" / "fixture.splits.json"
-                    splits_data = parse_strict_json(splits_path.read_text(encoding="utf-8")) if splits_path.is_file() else {}
-
-                    cur.execute(
-                        "SELECT id, book_id, chapter_id, hadith_number, urn, arabic_full, english_full, "
-                        "text_split_mode, arabic_sanad, arabic_matn, arabic_matn_clean, english_narrator, "
-                        "english_body, grade_ar, grade_en, reference_json, is_ar_missing, is_en_missing "
-                        "FROM hadiths ORDER BY id;"
-                    )
-                    db_hadiths = cur.fetchall()
-                    if len(db_hadiths) != len(hadith_json["hadiths"]):
-                        raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith count mismatch: {len(db_hadiths)} vs {len(hadith_json['hadiths'])}")
-                    sorted_raw_hadiths = sorted(hadith_json["hadiths"], key=lambda x: x["id"])
-                    for db_h, raw_h in zip(db_hadiths, sorted_raw_hadiths):
-                        (
-                            h_id, b_id, c_id, h_num, urn, ar_full, en_full,
-                            split_mode, ar_sanad, ar_matn, ar_matn_clean,
-                            en_narrator, en_body, g_ar, g_en, ref_json,
-                            is_ar_miss, is_en_miss
-                        ) = [val.decode("utf-8") if isinstance(val, bytes) else val for val in db_h]
-
-                        if h_id != raw_h["id"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith id mismatch: {h_id} vs {raw_h['id']}")
-                        if b_id != raw_h["bookId"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} book_id mismatch")
-                        if c_id != raw_h["chapterId"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} chapter_id mismatch")
-                        if h_num != raw_h["hadithNumber"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} hadith_number mismatch")
-                        if urn != raw_h["urn"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} urn mismatch")
-                        if ar_full != raw_h["arabicFull"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} arabic_full mismatch")
-                        if en_full != raw_h["englishFull"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} english_full mismatch")
-                        if split_mode != raw_h["textSplitMode"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} text_split_mode mismatch")
-                        if en_narrator != raw_h["englishNarrator"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} english_narrator mismatch")
-                        if en_body != raw_h["englishBody"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} english_body mismatch")
-                        if g_ar != raw_h["gradeAr"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} grade_ar mismatch")
-                        if g_en != raw_h["gradeEn"]:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} grade_en mismatch")
-
-                        exp_ref_json = json.dumps(raw_h["reference"], sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-                        if ref_json != exp_ref_json:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} reference_json mismatch")
-
-                        exp_is_ar = 1 if raw_h["arabicFull"] is None else 0
-                        exp_is_en = 1 if raw_h["englishFull"] is None else 0
-                        if is_ar_miss != exp_is_ar:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} is_ar_missing mismatch")
-                        if is_en_miss != exp_is_en:
-                            raise GateCheckError(2, f"{root_label}/{db_fn}", f"Hadith {h_id} is_en_missing mismatch")
-
-                        if split_mode == "unsplit_raw":
-                            if ar_sanad is not None or ar_matn is not None or ar_matn_clean is not None:
-                                raise GateCheckError(2, f"{root_label}/{db_fn}", f"Unsplit Hadith record {h_id} must have NULL split fields")
-                        elif split_mode == "source_verified":
-                            h_id_str = str(h_id)
-                            if h_id_str not in splits_data:
-                                raise GateCheckError(2, f"{root_label}/{db_fn}", f"source_verified Hadith {h_id} missing split evidence in splits file")
-                            split_ev = splits_data[h_id_str]
-                            if not isinstance(split_ev, dict) or "sourceRef" not in split_ev:
-                                raise GateCheckError(2, f"{root_label}/{db_fn}", f"Invalid split evidence shape for Hadith {h_id}")
-                            if ar_sanad != split_ev.get("arabicSanad") or ar_sanad != raw_h.get("arabicSanad"):
-                                raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_sanad mismatch for Hadith {h_id}")
-                            if ar_matn != split_ev.get("arabicMatn") or ar_matn != raw_h.get("arabicMatn"):
-                                raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_matn mismatch for Hadith {h_id}")
-                            if normalize_arabic(ar_matn) != ar_matn_clean:
-                                raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_matn_clean search projection mismatch for Hadith {h_id}")
-
-                    _verify_table_rows_by_pk(
-                        cur, "books", ["id", "number", "name_ar", "name_en"], "id", hadith_json["books"], root_label, db_fn,
-                        projections={"name_ar": lambda r: r.get("nameAr"), "name_en": lambda r: r.get("nameEn")}
-                    )
-                    _verify_table_rows_by_pk(
-                        cur, "chapters", ["id", "book_id", "number", "title_ar", "title_en"], "id", hadith_json["chapters"], root_label, db_fn,
-                        projections={"book_id": lambda r: r["bookId"], "title_ar": lambda r: r.get("titleAr"), "title_en": lambda r: r.get("titleEn")}
-                    )
+                    _verify_hadith_db_text_and_source(ctx, cur, pack_id, "fixture", root_label, db_fn)
             finally:
                 conn.close()
 
 
 def stage_9_coverage(ctx: GateContext) -> None:
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for db_fn in sorted(ctx.declared_files_by_root[root_label]):
+                pack_id = db_fn.removesuffix(".db")
+                slug = pack_id.removeprefix("hadith-")
+                oracle = _HADITH_LOCAL_ORACLE.get(slug)
+                if not oracle:
+                    raise GateCheckError(1, f"{root_label}/{db_fn}", f"Unknown Hadith pack slug {slug}")
+                (exp_total, exp_ar_pres, exp_en_pres, exp_en_miss, exp_both) = oracle["expected_counts"]
+
+                db_path = root_path / db_fn
+                conn = _open_ro_db(db_path)
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT metric, count FROM coverage_report;")
+                    cov = dict(cur.fetchall())
+
+                    if cov.get("expected_total") != exp_total:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"expected_total mismatch: expected {exp_total}, got {cov.get('expected_total')}")
+                    if cov.get("ar_present") != exp_ar_pres:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"ar_present mismatch: expected {exp_ar_pres}, got {cov.get('ar_present')}")
+                    if cov.get("en_present") != exp_en_pres:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"en_present mismatch: expected {exp_en_pres}, got {cov.get('en_present')}")
+                    if cov.get("en_missing") != exp_en_miss:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"en_missing mismatch: expected {exp_en_miss}, got {cov.get('en_missing')}")
+
+                    cur.execute("SELECT COUNT(*), COUNT(arabic_full), COUNT(english_full), SUM(is_en_missing) FROM hadiths;")
+                    (act_total, act_ar, act_en, act_en_miss) = cur.fetchone()
+                    act_en_miss = act_en_miss if act_en_miss is not None else 0
+
+                    if act_total != exp_total:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"hadiths count mismatch: expected {exp_total}, got {act_total}")
+                    if act_ar != exp_ar_pres:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"hadiths arabic_full present mismatch: expected {exp_ar_pres}, got {act_ar}")
+                    if act_en != exp_en_pres:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"hadiths english_full present mismatch: expected {exp_en_pres}, got {act_en}")
+                    if act_en_miss != exp_en_miss:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"hadiths is_en_missing sum mismatch: expected {exp_en_miss}, got {act_en_miss}")
+
+                    cur.execute("SELECT COUNT(*) FROM hadiths WHERE arabic_full IS NOT NULL AND english_full IS NOT NULL;")
+                    act_both = cur.fetchone()[0]
+                    if act_both != exp_both:
+                        raise GateCheckError(1, f"{root_label}/{db_fn}", f"hadiths both present mismatch: expected {exp_both}, got {act_both}")
+                finally:
+                    conn.close()
+        return
+
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data = ctx.manifest_data_by_root[root_label][0]
         sqlite_packs = sorted([p for p in cat_data["packs"] if p["format"] == "sqlite"], key=lambda p: p["id"])
@@ -2171,7 +2571,125 @@ def stage_9_coverage(ctx: GateContext) -> None:
                 conn.close()
 
 
+def _run_fts_temp_integrity_check(
+    db_path: Path,
+    fts_tables: tuple[str, ...],
+    root_label: str,
+    db_fn: str,
+    pack_id: str,
+) -> None:
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
+        temp_db_path = Path(tf.name)
+    try:
+        shutil.copyfile(db_path, temp_db_path)
+        tconn = sqlite3.connect(temp_db_path)
+        try:
+            tcur = tconn.cursor()
+            for fts_tbl in fts_tables:
+                if fts_tbl not in _PACK_FTS_MAP[pack_id]:
+                    raise GateCheckError(4, f"{root_label}/{db_fn}", f"Non-allowlisted FTS table {fts_tbl}")
+                try:
+                    tcur.execute(f"INSERT INTO {fts_tbl}({fts_tbl}, rank) VALUES('integrity-check', 1);")
+                except Exception as exc:
+                    raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS integrity-check failed on {fts_tbl}: {exc}") from exc
+        finally:
+            tconn.close()
+    finally:
+        if temp_db_path.exists():
+            try:
+                temp_db_path.unlink()
+            except OSError:
+                pass
+
+
+def _run_fts_hadith_local(ctx: GateContext, root_label: str, db_fn: str, db_path: Path, slug: str) -> None:
+    pack_id = f"hadith-{slug}"
+    fts_tables = ("hadiths_fts", "hadiths_full_fts")
+    _run_fts_temp_integrity_check(db_path, fts_tables, root_label, db_fn, pack_id)
+
+    oracle = _HADITH_LOCAL_ORACLE.get(slug)
+    if not oracle:
+        raise GateCheckError(4, f"{root_label}/{db_fn}", f"Unknown Hadith pack slug {slug}")
+
+    conn = _open_ro_db(db_path)
+    try:
+        cur = conn.cursor()
+
+        # Token coverage checks using fts5vocab
+        cur.execute("CREATE VIRTUAL TABLE temp.vocab_full USING fts5vocab(main, 'hadiths_full_fts', 'instance');")
+        doc_set_full = {r[0] for r in cur.execute("SELECT DISTINCT doc FROM temp.vocab_full;").fetchall()}
+        cur.execute("DROP TABLE temp.vocab_full;")
+
+        cur.execute("SELECT id FROM hadiths WHERE arabic_full IS NOT NULL;")
+        exp_ar_docs = {r[0] for r in cur.fetchall()}
+        if doc_set_full != exp_ar_docs:
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"fts5vocab hadiths_full_fts doc coverage mismatch: {len(doc_set_full)} vs {len(exp_ar_docs)}")
+
+        cur.execute("CREATE VIRTUAL TABLE temp.vocab_primary USING fts5vocab(main, 'hadiths_fts', 'instance');")
+        doc_set_en = {r[0] for r in cur.execute("SELECT DISTINCT doc FROM temp.vocab_primary WHERE col = 'english_body';").fetchall()}
+        cur.execute("DROP TABLE temp.vocab_primary;")
+
+        cur.execute("SELECT id FROM hadiths WHERE english_body IS NOT NULL;")
+        exp_en_docs = {r[0] for r in cur.fetchall()}
+        if doc_set_en != exp_en_docs:
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"fts5vocab hadiths_fts english_body doc coverage mismatch: {len(doc_set_en)} vs {len(exp_en_docs)}")
+
+        # Smoke queries
+        row_id = oracle["id"]
+        ar_literal = oracle["ar_literal"]
+        en_literal = oracle["en_literal"]
+
+        # 1. Secondary index: diacritized Arabic (normalized before quoting)
+        ar_esc1 = normalize_arabic(ar_literal).replace('"', '""')
+        q1 = f'"{ar_esc1}"'
+        cur.execute("SELECT rowid FROM hadiths_full_fts WHERE hadiths_full_fts MATCH ? AND rowid = ? ORDER BY rowid;", (q1, row_id))
+        if [r[0] for r in cur.fetchall()] != [row_id]:
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Secondary FTS diacritized Arabic query failed for {slug}")
+
+        # 2. Secondary index: normalized Arabic
+        norm_ar = normalize_arabic(ar_literal)
+        ar_esc2 = normalize_arabic(norm_ar).replace('"', '""')
+        q2 = f'"{ar_esc2}"'
+        cur.execute("SELECT rowid FROM hadiths_full_fts WHERE hadiths_full_fts MATCH ? AND rowid = ? ORDER BY rowid;", (q2, row_id))
+        if [r[0] for r in cur.fetchall()] != [row_id]:
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Secondary FTS normalized Arabic query failed for {slug}")
+
+        # 3. Primary index: query same Arabic on arabic_matn_clean -> expect 0 rows
+        q_matn = f'arabic_matn_clean : "{ar_esc1}"'
+        cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ? AND rowid = ? ORDER BY rowid;", (q_matn, row_id))
+        if cur.fetchall():
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Primary FTS arabic_matn_clean unexpectedly matched unsplit Arabic for {slug}")
+
+        # 4. Primary index: query listed English phrase on english_body
+        if en_literal != "none":
+            en_esc = en_literal.replace('"', '""')
+            q_en = f'english_body : "{en_esc}"'
+            cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ? AND rowid = ? ORDER BY rowid;", (q_en, row_id))
+            if [r[0] for r in cur.fetchall()] != [row_id]:
+                raise GateCheckError(4, f"{root_label}/{db_fn}", f"Primary FTS english_body query failed for {slug}")
+        else:
+            q_mercy = 'english_body : "mercy"'
+            cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ? AND rowid = ? ORDER BY rowid;", (q_mercy, row_id))
+            if cur.fetchall():
+                raise GateCheckError(4, f"{root_label}/{db_fn}", f"Primary FTS english_body unexpectedly matched 'mercy' for {slug}")
+
+        # 5. Both indexes: query "zzzzfixturemissing" -> expect 0 rows
+        for fts_tbl in ("hadiths_full_fts", "hadiths_fts"):
+            cur.execute(f"SELECT rowid FROM {fts_tbl} WHERE {fts_tbl} MATCH ? AND rowid = ? ORDER BY rowid;", ('"zzzzfixturemissing"', row_id))
+            if cur.fetchall():
+                raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS query for negative literal matched in {fts_tbl} for {slug}")
+    finally:
+        conn.close()
+
+
 def stage_10_fts(ctx: GateContext) -> None:
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for db_fn in sorted(ctx.declared_files_by_root[root_label]):
+                slug = db_fn.removesuffix(".db").removeprefix("hadith-")
+                _run_fts_hadith_local(ctx, root_label, db_fn, root_path / db_fn, slug)
+        return
+
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         cat_data = ctx.manifest_data_by_root[root_label][0]
         sqlite_packs = sorted([p for p in cat_data["packs"] if p["format"] == "sqlite"], key=lambda p: p["id"])
@@ -2184,29 +2702,7 @@ def stage_10_fts(ctx: GateContext) -> None:
             if not fts_tables:
                 continue
 
-            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
-                temp_db_path = Path(tf.name)
-            try:
-                shutil.copyfile(db_path, temp_db_path)
-                tconn = sqlite3.connect(temp_db_path)
-                try:
-                    tcur = tconn.cursor()
-                    for fts_tbl in fts_tables:
-                        if fts_tbl not in _PACK_FTS_MAP[pack_id]:
-                            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Non-allowlisted FTS table {fts_tbl}")
-                        try:
-                            tcur.execute(f"INSERT INTO {fts_tbl}({fts_tbl}, rank) VALUES('integrity-check', 1);")
-                        except Exception as exc:
-                            raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS integrity-check failed on {fts_tbl}: {exc}") from exc
-                finally:
-                    tconn.close()
-            finally:
-                if temp_db_path.exists():
-                    try:
-                        temp_db_path.unlink()
-                    except OSError:
-                        pass
-
+            _run_fts_temp_integrity_check(db_path, fts_tables, root_label, db_fn, pack_id)
             if ctx.profile == "v0.1.0":
                 _run_fts_queries_v010(ctx, root_label, db_fn, db_path, pack_id)
             else:
@@ -2361,6 +2857,8 @@ def _stage_11_tafsir_v010(ctx: GateContext) -> None:
 
 
 def stage_11_tafsir(ctx: GateContext) -> None:
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        return
     if ctx.profile == "v0.1.0":
         _stage_11_tafsir_v010(ctx)
         return
@@ -2532,14 +3030,14 @@ def run_checks(
     expectations: dict[str, Any] | None = None,
     local_review: bool = False,
 ) -> None:
-    if profile not in ("fixture", "v0.1.0"):
+    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local"):
         raise ValueError(f"Unsupported profile: {profile!r}")
     if local_review and profile != "v0.1.0":
         raise ValueError("local_review is only permitted for profile 'v0.1.0'")
     if profile == "fixture" and expectations is None:
         raise ValueError("expectations is required for fixture profile")
-    if profile == "v0.1.0" and expectations is not None:
-        raise ValueError("expectations is not permitted for v0.1.0 profile")
+    if profile in ("v0.1.0", "hadith-pilot", "hadith-local") and expectations is not None:
+        raise ValueError(f"expectations is not permitted for {profile} profile")
 
     repo_root = Path(__file__).resolve().parents[2]
     specs_dir = repo_root / "specs"
@@ -2565,9 +3063,15 @@ def run_checks(
     print("Check #2: Passed (text encoding, projections, split evidence)")
     print("Check #3: Passed (SQLite integrity, foreign keys, schema)")
     print("Check #4: Passed (FTS integrity and query verification)")
-    print("Check #5: Passed (manifest schemas, asset verification, probes)")
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        print("Check #5: Passed (flat DB asset inventory and sizes)")
+    else:
+        print("Check #5: Passed (manifest schemas, asset verification, probes)")
     print("Check #6: Passed (root identity and cross-root byte equality)")
-    if ctx.profile == "v0.1.0" and ctx.local_review:
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        expected_pids = _HADITH_PILOT_PACK_IDS if ctx.profile == "hadith-pilot" else _HADITH_ALL_PACK_IDS
+        print(f"Clearance pending (local verification only): {', '.join(expected_pids)}")
+    elif ctx.profile == "v0.1.0" and ctx.local_review:
         pending_packs = sorted([
             pid for pid, rec in ctx.license_records.items()
             if rec.get("status") == "pending"
@@ -2579,7 +3083,10 @@ def run_checks(
     else:
         print("Check #7: Passed (source lock, licenses, metadata reconciliation)")
     print("Check 8: Not applicable (no production QAC/QUL pair).")
-    print("Check #9: Passed (Tafsir intervals and map pointers)")
+    if ctx.profile in ("hadith-pilot", "hadith-local"):
+        print("Check 9: Not applicable (no Tafsir packs in Hadith profile).")
+    else:
+        print("Check #9: Passed (Tafsir intervals and map pointers)")
     print("All quality gate checks passed successfully.")
 
 
@@ -2714,8 +3221,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     profile = args.profile
-    if profile not in ("fixture", "v0.1.0"):
-        sys.stderr.write(f"CLI error: unsupported profile {profile!r}; must be 'fixture' or 'v0.1.0'\n")
+    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local"):
+        sys.stderr.write(
+            f"CLI error: unsupported profile {profile!r}; must be 'fixture', 'v0.1.0', 'hadith-pilot', or 'hadith-local'\n"
+        )
         return 2
 
     if profile == "fixture":
@@ -2737,7 +3246,7 @@ def main(argv: list[str] | None = None) -> int:
             return 2
     else:
         if args.expectations is not None:
-            sys.stderr.write("CLI error: --expectations is rejected for v0.1.0 profile\n")
+            sys.stderr.write(f"CLI error: --expectations is rejected for {profile} profile\n")
             return 2
         expectations = None
 

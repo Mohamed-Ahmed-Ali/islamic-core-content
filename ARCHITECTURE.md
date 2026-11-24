@@ -695,9 +695,11 @@ From the repository root:
 ```sh
 python -m pipelines.validators.quality_gate --profile fixture --candidate A --rebuild B --sources-root S --expectations E
 python -m pipelines.validators.quality_gate --profile v0.1.0 --candidate A --rebuild B --sources-root S
+python -m pipelines.validators.quality_gate --profile hadith-pilot --candidate A --rebuild B --sources-root S
+python -m pipelines.validators.quality_gate --profile hadith-local --candidate A --rebuild B --sources-root S
 ```
 
-`A` and `B` are distinct, independently built clean directories with the same exact-case flat release asset paths, including `catalog.json` and `audio-manifest.json` in each root. `S/raw-inputs/` contains staged inputs; `S/sources/` contains `registry.json`, `manifest.lock.json` and `licenses/{id}.json`. Only release mode also reads `S/sources/release-v0.1.0.json` (§7.1). Fixture mode requires `--expectations` pointing to the checked-in `tests/fixtures/expectations.json` (`PLAN.md` Phase 0); release mode rejects the flag and never reads fixture oracles. Validate both roots independently and compare them; do not build or upload. CLI misuse exits `2`; validation exits `1` with check number, offending path or pack/key, and reason; exit `0` only if every applicable check passes. Report explicit not-applicable reasons; a missing expected item is failure, never a skip.
+`A` and `B` are distinct, independently built clean directories with the same exact-case flat release asset paths, including `catalog.json` and `audio-manifest.json` in each root (or flat DB-only roots for Hadith local profiles). `S/raw-inputs/` contains staged inputs; `S/sources/` contains `registry.json`, `manifest.lock.json` and `licenses/{id}.json`. Only release mode also reads `S/sources/release-v0.1.0.json` (§7.1). Fixture mode requires `--expectations` pointing to the checked-in `tests/fixtures/expectations.json` (`PLAN.md` Phase 0); release mode and both Hadith profiles reject the flag and never read fixture oracles. Validate both roots independently and compare them; do not build or upload. CLI misuse exits `2`; validation exits `1` with check number, offending path or pack/key, and reason; exit `0` only if every applicable check passes. Report explicit not-applicable reasons; a missing expected item is failure, never a skip.
 
 Reject `A` and `B` with the same filesystem identity (#6). Manifest/asset entries must be regular files, not links or junctions; reject file inode aliases across the roots. The workflow creates and builds each clean root independently; the gate establishes byte equality, not build history.
 
@@ -707,6 +709,8 @@ Run in this order, failing fast at the first offending asset in lexical path ord
 | --- | --- |
 | `fixture` (Phase 0) | #1–#7 and #9 as applicable to the synthetic pack inventory. #8 is not applicable: no production QAC/QUL pair. No release or data-clearance claim follows from fixtures. |
 | `v0.1.0` (Phase 1) | #1–#7 and #9 as applicable to all five SQLite packs and both variants of each of the six tracks. #8 is not applicable: no QUL WBW pack. No partial coverage or missing item permitted. |
+| `hadith-pilot` (Local only) | Flat DB-only roots for `hadith-bukhari.db` and `hadith-muslim.db`. Verifies canonical lock, pending licenses ('Clearance pending (local verification only)'), SQLite schema, keys, text, coverage, dual FTS token coverage and queries, and cross-root byte equality. Manifest checks and #8/#9 not applicable. |
+| `hadith-local` (Local only) | Flat DB-only roots for all nine Hadith packs (`bukhari`, `muslim`, `nasai`, `abudawud`, `tirmidhi`, `ibnmajah`, `malik`, `darimi`, `ahmad`). Same local checks across the entire nine-pack inventory. |
 | First profile shipping QAC and QUL WBW | #8 also applies whenever both ship. Define that profile and its oracles in Phase 3. |
 
 For v0.1.0 #4 restricts each smoke query to `rowid=2` and expects `[2]`: core `رَبِّ العالمين` and `رب العالمين`, Jalalayn the same pair, Pickthall `Lord of the Worlds`. The negative literal `zzzzfixturemissing` returns `[]` for each table at that row. Perform queries using the §6 literal binding rule. Fixture #4 uses the checked-in oracle instead.
