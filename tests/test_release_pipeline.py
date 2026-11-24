@@ -18,6 +18,7 @@ from pipelines.common.lock_inputs import (
     LockEntry,
     author_lock,
     canonical_entries_json,
+    canonical_lock_json,
     parse_and_validate_lock,
     parse_strict_json,
     verify_lock,
@@ -32,6 +33,7 @@ from pipelines.release.release_packs import (
 )
 from pipelines.release.generate_catalog import generate_catalog
 from pipelines.validators.quality_gate import (
+    _V010_PATH_PACK_MAP,
     GateCheckError,
     format_duration_seconds,
     run_checks,
@@ -42,6 +44,26 @@ from pipelines.validators.quality_gate import (
 
 def _compute_sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest().lower()
+
+def _copy_v010_source_tree(repo_root: Path, sources_dir: Path) -> None:
+    shutil_copy = __import__("shutil").copytree
+    shutil_copy(repo_root / "sources" / "licenses", sources_dir / "licenses")
+    reg_data = json.loads((repo_root / "sources" / "registry.json").read_text(encoding="utf-8"))
+    v010_reg = {k: v for k, v in reg_data.items() if k in _V010_PATH_PACK_MAP}
+    (sources_dir / "registry.json").write_text(json.dumps(v010_reg), encoding="utf-8")
+    lock_data = json.loads((repo_root / "sources" / "manifest.lock.json").read_text(encoding="utf-8"))
+    v010_inputs = [i for i in lock_data["inputs"] if i["path"] in _V010_PATH_PACK_MAP]
+    entries = [
+        LockEntry(
+            path=i["path"],
+            source_url=i["sourceUrl"],
+            source_version=i["sourceVersion"],
+            size_bytes=i["sizeBytes"],
+            sha256=i["sha256"],
+        )
+        for i in v010_inputs
+    ]
+    (sources_dir / "manifest.lock.json").write_bytes(canonical_lock_json(entries))
 
 
 def test_release_descriptor_validation(tmp_path: Path) -> None:
@@ -331,11 +353,8 @@ def test_fixture_license_rejected_in_v0_1_0_both_strict_and_local(tmp_path: Path
     raw_root = tmp_path / "raw-inputs"
     raw_root.mkdir(parents=True)
 
-    # Copy the checked-in registry, lock, and license files
-    shutil_copy = __import__("shutil").copytree
-    shutil_copy(repo_root / "sources" / "licenses", sources_dir / "licenses")
-    (sources_dir / "registry.json").write_bytes((repo_root / "sources" / "registry.json").read_bytes())
-    (sources_dir / "manifest.lock.json").write_bytes((repo_root / "sources" / "manifest.lock.json").read_bytes())
+    # Copy the Phase 1 v0.1.0 registry, lock, and license files
+    _copy_v010_source_tree(repo_root, sources_dir)
 
     # Mutate audio-adhan-core.json status to "fixture"
     lic_path = sources_dir / "licenses" / "audio-adhan-core.json"
@@ -365,11 +384,8 @@ def test_pending_record_strict_check7_fails_but_local_review_passes(tmp_path: Pa
     raw_root = tmp_path / "raw-inputs"
     raw_root.mkdir(parents=True)
 
-    # Copy the checked-in registry, lock, and license files
-    shutil_copy = __import__("shutil").copytree
-    shutil_copy(repo_root / "sources" / "licenses", sources_dir / "licenses")
-    (sources_dir / "registry.json").write_bytes((repo_root / "sources" / "registry.json").read_bytes())
-    (sources_dir / "manifest.lock.json").write_bytes((repo_root / "sources" / "manifest.lock.json").read_bytes())
+    # Copy the Phase 1 v0.1.0 registry, lock, and license files
+    _copy_v010_source_tree(repo_root, sources_dir)
     reg_data = json.loads((sources_dir / "registry.json").read_text(encoding="utf-8"))
     for p in reg_data.keys():
         target = raw_root / p
@@ -1167,11 +1183,7 @@ def test_generate_catalog_reconciliation_and_coverage_null_notes(tmp_path: Path,
     asset_root.mkdir(parents=True)
 
     # Copy licenses, registry, lock, descriptor
-    shutil_copy = __import__("shutil").copytree
-    shutil_copy(repo_root / "sources" / "licenses", sources_root / "sources" / "licenses")
-    (sources_root / "sources" / "registry.json").write_bytes((repo_root / "sources" / "registry.json").read_bytes())
-    lock_bytes = (repo_root / "sources" / "manifest.lock.json").read_bytes().replace(b"\r\n", b"\n")
-    (sources_root / "sources" / "manifest.lock.json").write_bytes(lock_bytes)
+    _copy_v010_source_tree(repo_root, sources_root / "sources")
     (sources_root / "sources" / "release-v0.1.0.json").write_bytes((repo_root / "sources" / "release-v0.1.0.json").read_bytes())
 
     raw_root = sources_root / "raw-inputs"

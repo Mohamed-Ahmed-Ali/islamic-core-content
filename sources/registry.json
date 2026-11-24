@@ -48,6 +48,69 @@
     "sourceUrl": "https://corpus.quran.com/download/",
     "sourceVersion": "0.4"
   },
+  "hadith/abudawud.json": {
+    "packIds": [
+      "hadith-abudawud"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/abudawud.json",
+    "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
+  },
+  "hadith/ahmad.json": {
+    "packIds": [
+      "hadith-ahmad"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/mhashim6/Open-Hadith-Data/1515f6cba21efed20d8916bf55acef1dffa0d2d5/Musnad_Ahmad_Ibn-Hanbal/musnad_ahmad_ibn-hanbal_ahadith_mushakkala.utf8.csv",
+    "sourceVersion": "1515f6cba21efed20d8916bf55acef1dffa0d2d5"
+  },
+  "hadith/bukhari.json": {
+    "packIds": [
+      "hadith-bukhari"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/bukhari.json",
+    "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
+  },
+  "hadith/darimi.json": {
+    "packIds": [
+      "hadith-darimi"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/darimi.json",
+    "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
+  },
+  "hadith/ibnmajah.json": {
+    "packIds": [
+      "hadith-ibnmajah"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/ibnmajah.json",
+    "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
+  },
+  "hadith/malik.json": {
+    "packIds": [
+      "hadith-malik"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/malik.json",
+    "sourceVersion": "local-composite-sha256-61473d46b5a87ca095e4bc300bed3412843844509d09615c99f4d85ab70e0e0c"
+  },
+  "hadith/muslim.json": {
+    "packIds": [
+      "hadith-muslim"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/muslim.json",
+    "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
+  },
+  "hadith/nasai.json": {
+    "packIds": [
+      "hadith-nasai"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/nasai.json",
+    "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
+  },
+  "hadith/tirmidhi.json": {
+    "packIds": [
+      "hadith-tirmidhi"
+    ],
+    "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/tirmidhi.json",
+    "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
+  },
   "tanzil/ar.jalalayn.xml": {
     "packIds": [
       "quran-tafsir-ar-jalalayn"

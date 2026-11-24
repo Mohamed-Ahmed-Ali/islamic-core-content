@@ -1,0 +1,25 @@
+{
+  "licenseSpdx": "LicenseRef-Malik-Composite-Unreviewed",
+  "packId": "hadith-malik",
+  "primaryPath": "hadith/malik.json",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Base Sunnah.com snapshot via AhmedBaset (https://github.com/AhmedBaset/hadith-json); reported attribution for 125 Arabic athar fills: Yahya al-Laythi recension, Muhammad Fuad Abd al-Baqi tahqiq, via Arabic Wikisource and Maktaba Shamela Book 1699; reported attribution for 12 English fills: Sunnah.com (2), Aisha Bewley translation (4), and standard chapter section headings (6). Explicitly distinguish those six headings from translations.",
+      "name": "Muwatta Malik — local composite of AhmedBaset/hadith-json and supplemental texts",
+      "notice": "\"We do not permit the scraping of our data, nor mass reproduction of entire books or collections on other websites.\" Underlying editions, specific translation attributions and redistribution rights remain pending review; inclusion of evidence links does not grant rights.",
+      "path": "hadith/malik.json",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://sunnah.com/malik",
+        "https://sunnah.com/about#Reproduction",
+        "https://ar.wikisource.org/wiki/%D8%A7%D9%84%D9%85%D9%88%D8%B7%D8%A3",
+        "https://shamela.ws/book/1699",
+        "https://islamicarchives.org/works/aisha-bewley-al-muwatta-of-imam-malik-ibn-anas-the-first-formulation-of-islamic-law-en/"
+      ],
+      "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/malik.json",
+      "sourceVersion": "local-composite-sha256-61473d46b5a87ca095e4bc300bed3412843844509d09615c99f4d85ab70e0e0c"
+    }
+  ],
+  "status": "pending"
+}

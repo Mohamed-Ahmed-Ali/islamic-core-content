@@ -1,0 +1,22 @@
+{
+  "licenseSpdx": "LicenseRef-SunnahCom-Hadith-Unreviewed",
+  "packId": "hadith-darimi",
+  "primaryPath": "hadith/darimi.json",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Sunnah.com snapshot via AhmedBaset/hadith-json (https://github.com/AhmedBaset/hadith-json), based on https://sunnah.com/darimi. No English translation in the selected snapshot.",
+      "name": "Sunan al-Darimi — AhmedBaset/hadith-json Sunnah.com snapshot",
+      "notice": "\"We do not permit the scraping of our data, nor mass reproduction of entire books or collections on other websites.\" Underlying editions, specific translation attributions, and redistribution rights remain pending review.",
+      "path": "hadith/darimi.json",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://sunnah.com/darimi",
+        "https://sunnah.com/about#Reproduction"
+      ],
+      "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/darimi.json",
+      "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
+    }
+  ],
+  "status": "pending"
+}

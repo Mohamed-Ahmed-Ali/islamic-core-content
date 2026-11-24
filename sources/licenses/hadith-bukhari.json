@@ -1,0 +1,22 @@
+{
+  "licenseSpdx": "LicenseRef-SunnahCom-Hadith-Unreviewed",
+  "packId": "hadith-bukhari",
+  "primaryPath": "hadith/bukhari.json",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Sunnah.com snapshot via AhmedBaset/hadith-json (https://github.com/AhmedBaset/hadith-json), based on https://sunnah.com/bukhari. Translator not verified for this snapshot.",
+      "name": "Sahih al-Bukhari — AhmedBaset/hadith-json Sunnah.com snapshot",
+      "notice": "\"We do not permit the scraping of our data, nor mass reproduction of entire books or collections on other websites.\" Underlying editions, specific translation attributions, and redistribution rights remain pending review.",
+      "path": "hadith/bukhari.json",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://sunnah.com/bukhari",
+        "https://sunnah.com/about#Reproduction"
+      ],
+      "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/bukhari.json",
+      "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
+    }
+  ],
+  "status": "pending"
+}

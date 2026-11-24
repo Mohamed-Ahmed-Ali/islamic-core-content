@@ -1,0 +1,22 @@
+{
+  "licenseSpdx": "ODbL-1.0 AND LicenseRef-ODC-DbCL-1.0",
+  "packId": "hadith-ahmad",
+  "primaryPath": "hadith/ahmad.json",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Credit Open-Hadith-Data (https://github.com/mhashim6/Open-Hadith-Data) and immediate upstream ceefour/hadith-islamware. State no English translation, no asserted clearance of underlying rights.",
+      "name": "Musnad Ahmad ibn Hanbal — Open-Hadith-Data diacritized Arabic edition",
+      "notice": "This Open-Hadith-Data project is made available under the Open Database License:\nhttp://opendatacommons.org/licenses/odbl/1.0/.\nAny rights in individual contents of the database are licensed under the Database Contents License:\nhttp://opendatacommons.org/licenses/dbcl/1.0/",
+      "path": "hadith/ahmad.json",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://github.com/mhashim6/Open-Hadith-Data/blob/1515f6cba21efed20d8916bf55acef1dffa0d2d5/LICENSE",
+        "https://github.com/mhashim6/Open-Hadith-Data/tree/1515f6cba21efed20d8916bf55acef1dffa0d2d5"
+      ],
+      "sourceUrl": "https://raw.githubusercontent.com/mhashim6/Open-Hadith-Data/1515f6cba21efed20d8916bf55acef1dffa0d2d5/Musnad_Ahmad_Ibn-Hanbal/musnad_ahmad_ibn-hanbal_ahadith_mushakkala.utf8.csv",
+      "sourceVersion": "1515f6cba21efed20d8916bf55acef1dffa0d2d5"
+    }
+  ],
+  "status": "pending"
+}
