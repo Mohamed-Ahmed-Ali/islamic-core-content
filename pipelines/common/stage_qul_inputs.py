@@ -8,7 +8,6 @@ import io
 import os
 from pathlib import Path
 import sqlite3
-import stat
 import sys
 from typing import Any
 import zipfile
@@ -16,8 +15,12 @@ import zipfile
 from pipelines.common.lock_inputs import (
     _is_symlink_or_junction,
     parse_and_validate_registry,
-    parse_strict_json,
     validate_safe_relative_path,
+)
+from pipelines.common.qul_input import (
+    open_sqlite_from_zip,
+    read_zip_strict_json,
+    validate_zip_member,
 )
 
 
@@ -84,35 +87,6 @@ def _validate_path_hierarchy(
 
     return current
 
-
-def _validate_zip_member(zf: zipfile.ZipFile, expected_name: str) -> zipfile.ZipInfo:
-    """Validate that zip contains exactly one regular member matching expected_name."""
-    infolist = zf.infolist()
-    if len(infolist) != 1:
-        raise ValueError(f"Archive must have exactly one member, found {len(infolist)}")
-    member = infolist[0]
-
-    if member.is_dir() or (member.external_attr & 0x10) != 0 or member.filename.endswith(("/", "\\")):
-        raise ValueError(f"Archive member must be a regular file, got directory: {member.filename!r}")
-
-    orig_name = getattr(member, "orig_filename", member.filename)
-    if orig_name != member.filename:
-        raise ValueError(f"Archive member original filename mismatch: {orig_name!r} vs {member.filename!r}")
-
-    unix_mode = member.external_attr >> 16
-    if unix_mode != 0:
-        file_type = stat.S_IFMT(unix_mode)
-        if file_type != 0 and file_type != stat.S_IFREG:
-            raise ValueError(
-                f"Archive member has nonregular Unix mode {oct(unix_mode)} (file type {oct(file_type)}): {member.filename!r}"
-            )
-
-    if member.filename != expected_name:
-        raise ValueError(
-            f"Archive member name mismatch: expected {expected_name!r}, got {member.filename!r}"
-        )
-
-    return member
 
 _SHA256_HEX_CHARS = frozenset("0123456789abcdef")
 
@@ -200,7 +174,7 @@ def stage_qul_file(
 
     # Validate zip member without extracting paths
     with zipfile.ZipFile(io.BytesIO(source_bytes)) as zf:
-        _validate_zip_member(zf, expected_member)
+        validate_zip_member(zf, expected_member)
 
     # Destination path validation
     out_rel = f"qul/{rel_path}"
@@ -224,7 +198,7 @@ def stage_qul_file(
     # Create destination directories component-by-component
     for parent_dir in reversed(out_abs.parents):
         if not parent_dir.exists():
-            parent_dir.mkdir()
+            parent_dir.mkdir(exist_ok=True)
 
     # Exclusive atomic creation without overwrite
     try:
@@ -274,35 +248,19 @@ def audit_wbw_sqlite_vs_json(
     if not d_path.is_file():
         raise FileNotFoundError(f"DB archive not found: {d_path}")
 
-    # Read and parse strict JSON from zip
-    with zipfile.ZipFile(j_path) as j_zip:
-        expected_j_member = j_path.name.removesuffix(".zip")
-        j_member = _validate_zip_member(j_zip, expected_j_member)
-        raw_json_text = j_zip.read(j_member).decode("utf-8")
-        json_data: dict[str, Any] = parse_strict_json(raw_json_text)
-
+    json_data = read_zip_strict_json(j_path)
     if not isinstance(json_data, dict):
         raise ValueError(f"JSON data in {j_path} must be an object")
-
-    # Read SQLite DB from zip into memory
-    with zipfile.ZipFile(d_path) as d_zip:
-        expected_d_member = d_path.name.removesuffix(".zip")
-        d_member = _validate_zip_member(d_zip, expected_d_member)
-        db_bytes = d_zip.read(d_member)
 
     if table_name not in ("word_translation", "word_transliteration"):
         raise ValueError(f"Invalid table name for WBW audit: {table_name!r}")
 
-    con = sqlite3.connect(":memory:")
+    con = open_sqlite_from_zip(d_path)
     try:
-        con.execute("PRAGMA trusted_schema = OFF")
-        con.execute("PRAGMA query_only = ON")
-        con.deserialize(db_bytes)
         cur = con.cursor()
         cur.execute(
             f"SELECT surah_number, ayah_number, word_number, text FROM {table_name}"
         )
-
         sqlite_rows: dict[str, str] = {}
         for row in cur:
             surah, ayah, word, text = row

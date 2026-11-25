@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 from pathlib import Path
 import sqlite3
 import stat
+from typing import Any
 import zipfile
 import pytest
-
 from pipelines.common.stage_qul_inputs import (
     stage_qul_file,
     audit_wbw_sqlite_vs_json,
@@ -462,3 +463,671 @@ def test_task_3_1_wbw_audit_rejects_non_integer_coordinate_types(tmp_path: Path)
             db_archive_path=db_path,
             table_name="word_translation",
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 3.2: English QUL word meanings pack builder and QUL input helpers
+# ---------------------------------------------------------------------------
+
+def test_task_3_2_qul_input_helpers(tmp_path: Path) -> None:
+    from pipelines.common.qul_input import (
+        validate_zip_member,
+        read_zip_strict_json,
+        open_sqlite_from_zip,
+    )
+
+    # 1. Test validate_zip_member and read_zip_strict_json
+    bad_json_zip = tmp_path / "bad.json.zip"
+    bad_json_zip.write_bytes(_make_zip_bytes("bad.json", b"{invalid json}"))
+    with pytest.raises(ValueError, match="JSON"):
+        read_zip_strict_json(bad_json_zip)
+
+    valid_json_zip = tmp_path / "valid.json.zip"
+    valid_json_zip.write_bytes(_make_zip_bytes("valid.json", b'{"key": "value"}'))
+    data = read_zip_strict_json(valid_json_zip)
+    assert data == {"key": "value"}
+
+    # 2. Test open_sqlite_from_zip
+    con0 = sqlite3.connect(":memory:")
+    con0.execute("CREATE TABLE t (id INTEGER, val TEXT);")
+    con0.execute("INSERT INTO t VALUES (1, 'hello');")
+    db_bytes = con0.serialize()
+    con0.close()
+
+    db_zip = tmp_path / "sample.db.zip"
+    db_zip.write_bytes(_make_zip_bytes("sample.db", db_bytes))
+    con = open_sqlite_from_zip(db_zip)
+    try:
+        cur = con.cursor()
+        cur.execute("SELECT id, val FROM t;")
+        rows = cur.fetchall()
+        assert rows == [(1, "hello")]
+        # verify query_only pragma
+        with pytest.raises(sqlite3.OperationalError):
+            con.execute("INSERT INTO t VALUES (2, 'fail');")
+    finally:
+        con.close()
+
+
+def test_task_3_2_wbw_loader_rejects_unknown_coordinate_gap(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import (
+        load_qul_wbw_meanings,
+        load_qpc_hafs_tajweed_words,
+    )
+
+    # Missing coordinate gap in normal verse (e.g. 1:1:1 and 1:1:3 present, but 1:1:2 missing)
+    gap_meanings = {
+        "1:1:1": "In",
+        "1:1:3": "the Most Gracious",
+        "1:1:4": "(1)",
+    }
+    gap_zip = tmp_path / "gap_meanings.json.zip"
+    gap_zip.write_bytes(_make_zip_bytes("gap_meanings.json", json.dumps(gap_meanings).encode("utf-8")))
+
+    with pytest.raises(ValueError, match="contiguous|positions|gap"):
+        load_qul_wbw_meanings(gap_zip, ayah_keys=["1:1"])
+
+    # In 2:181, word 4 is the only allowed omitted position. If word 2 is omitted instead, reject.
+    bad_2_181 = {
+        "2:181:1": "Then whoever",
+        "2:181:3": "after what",
+        "2:181:4": "he heard",
+        "2:181:15": "(181)",
+    }
+    bad_zip = tmp_path / "bad_2_181.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("bad_2_181.json", json.dumps(bad_2_181).encode("utf-8")))
+    with pytest.raises(ValueError, match="positions|2:181"):
+        load_qul_wbw_meanings(bad_zip, ayah_keys=["2:181"])
+
+def test_task_3_2_wbw_meanings_rejects_noncanonical_coordinate(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qul_wbw_meanings
+
+    bad_meanings = {
+        "01:1:1": "In",
+        "1:1:2": "(1)",
+    }
+    bad_zip = tmp_path / "bad_coord.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("bad_coord.json", json.dumps(bad_meanings).encode("utf-8")))
+
+    with pytest.raises(ValueError, match="[Cc]oordinate|[Ff]ormat|[Cc]anonical"):
+        load_qul_wbw_meanings(bad_zip)
+
+
+def test_task_3_2_wbw_meanings_rejects_blank_text(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qul_wbw_meanings
+
+    bad_meanings = {
+        "1:1:1": "   ",
+        "1:1:2": "(1)",
+    }
+    bad_zip = tmp_path / "blank_gloss.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("blank_gloss.json", json.dumps(bad_meanings).encode("utf-8")))
+
+    with pytest.raises(ValueError, match="[Bb]lank|[Ee]mpty|gloss"):
+        load_qul_wbw_meanings(bad_zip)
+
+
+def test_task_3_2_wbw_meanings_rejects_marker_looking_lexical_row(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qul_wbw_meanings
+
+    bad_meanings = {
+        "1:1:1": "(1)",
+        "1:1:2": "word",
+        "1:1:3": "(1)",
+    }
+    bad_zip = tmp_path / "marker_lexical.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("marker_lexical.json", json.dumps(bad_meanings).encode("utf-8")))
+
+    with pytest.raises(ValueError, match="[Mm]arker|lexical"):
+        load_qul_wbw_meanings(bad_zip)
+
+
+def test_task_3_2_wbw_meanings_rejects_extra_verse(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qul_wbw_meanings
+
+    meanings_with_extra = {
+        "1:1:1": "In",
+        "1:1:2": "(1)",
+        "999:1:1": "extra",
+        "999:1:2": "(1)",
+    }
+    bad_zip = tmp_path / "extra_verse.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("extra_verse.json", json.dumps(meanings_with_extra).encode("utf-8")))
+
+    with pytest.raises(ValueError, match="[Ee]xtra|[Mm]issing|verse"):
+        load_qul_wbw_meanings(bad_zip, ayah_keys=["1:1"])
+
+
+def test_task_3_2_qpc_loader_rejects_rule_without_class_and_accepts_valid_nesting(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qpc_hafs_tajweed_words
+
+    # <rule> without class MUST be rejected
+    bad_qpc = {
+        "1:1": {
+            "id": 1,
+            "verse_key": "1:1",
+            "surah": 1,
+            "ayah": 1,
+            "text": "بِسۡمِ <rule>ٱ</rule>للَّهِ ١",
+        }
+    }
+    bad_zip = tmp_path / "no_class.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("no_class.json", json.dumps(bad_qpc).encode("utf-8")))
+    with pytest.raises(ValueError, match="[Cc]lass|[Rr]ule|[Ii]nvalid tag"):
+        load_qpc_hafs_tajweed_words(bad_zip, ayah_keys=["1:1"])
+
+    # Valid nested rule (depth 2): <rule class="outer">a<rule class="inner">b</rule>c</rule>
+    nested_qpc = {
+        "1:1": {
+            "id": 1,
+            "verse_key": "1:1",
+            "surah": 1,
+            "ayah": 1,
+            "text": "بِسۡمِ <rule class=\"outer\">ٱ<rule class=\"inner\">ل</rule></rule> ١",
+        }
+    }
+    nested_zip = tmp_path / "nested.json.zip"
+    nested_zip.write_bytes(_make_zip_bytes("nested.json", json.dumps(nested_qpc).encode("utf-8")))
+    words = load_qpc_hafs_tajweed_words(nested_zip, ayah_keys=["1:1"])["1:1"]
+    assert words == ["بِسۡمِ", "ٱل"]
+
+
+def test_task_3_2_qpc_loader_validates_exact_fields_and_types(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qpc_hafs_tajweed_words
+
+    # 1. Extra field in record
+    bad_qpc = {
+        "1:1": {
+            "id": 1, "verse_key": "1:1", "surah": 1, "ayah": 1, "text": "بِسۡمِ ١",
+            "unexpected": "field",
+        }
+    }
+    bad_zip = tmp_path / "extra_field.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("extra_field.json", json.dumps(bad_qpc).encode("utf-8")))
+    with pytest.raises(ValueError, match="[Ff]ield|[Kk]ey"):
+        load_qpc_hafs_tajweed_words(bad_zip, ayah_keys=["1:1"])
+
+    # 2. Bool for surah/ayah
+    bad_qpc2 = {
+        "1:1": {
+            "id": 1, "verse_key": "1:1", "surah": True, "ayah": 1, "text": "بِسۡمِ ١",
+        }
+    }
+    bad_zip2 = tmp_path / "bool_surah.json.zip"
+    bad_zip2.write_bytes(_make_zip_bytes("bool_surah.json", json.dumps(bad_qpc2).encode("utf-8")))
+    with pytest.raises(ValueError, match="[Ii]nt|bool|type"):
+        load_qpc_hafs_tajweed_words(bad_zip2, ayah_keys=["1:1"])
+
+    # 3. Mismatched terminal decimal
+    bad_qpc3 = {
+        "1:1": {
+            "id": 1, "verse_key": "1:1", "surah": 1, "ayah": 1, "text": "بِسۡمِ ٢",
+        }
+    }
+    bad_zip3 = tmp_path / "mismatched_terminal.json.zip"
+    bad_zip3.write_bytes(_make_zip_bytes("mismatched_terminal.json", json.dumps(bad_qpc3).encode("utf-8")))
+    with pytest.raises(ValueError, match="[Tt]erminal|[Mm]ismatch|decimal"):
+        load_qpc_hafs_tajweed_words(bad_zip3, ayah_keys=["1:1"])
+
+    # 4. Decimal lexical leak
+    bad_qpc4 = {
+        "1:1": {
+            "id": 1, "verse_key": "1:1", "surah": 1, "ayah": 1, "text": "بِسۡمِ ١٢٣ ١",
+        }
+    }
+    bad_zip4 = tmp_path / "decimal_leak.json.zip"
+    bad_zip4.write_bytes(_make_zip_bytes("decimal_leak.json", json.dumps(bad_qpc4).encode("utf-8")))
+    with pytest.raises(ValueError, match="[Dd]ecimal|leak|digit"):
+        load_qpc_hafs_tajweed_words(bad_zip4, ayah_keys=["1:1"])
+
+    # 5. Blank text
+    bad_qpc5 = {
+        "1:1": {
+            "id": 1, "verse_key": "1:1", "surah": 1, "ayah": 1, "text": "   ",
+        }
+    }
+    bad_zip5 = tmp_path / "blank_qpc.json.zip"
+    bad_zip5.write_bytes(_make_zip_bytes("blank_qpc.json", json.dumps(bad_qpc5).encode("utf-8")))
+    with pytest.raises(ValueError, match="[Bb]lank|[Ee]mpty|text"):
+        load_qpc_hafs_tajweed_words(bad_zip5, ayah_keys=["1:1"])
+
+
+def test_task_3_2_qpc_loader_rejects_extra_verse(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qpc_hafs_tajweed_words
+
+    qpc_with_extra = {
+        "1:1": {"id": 1, "verse_key": "1:1", "surah": 1, "ayah": 1, "text": "بِسۡمِ ١"},
+        "999:1": {"id": 999, "verse_key": "999:1", "surah": 999, "ayah": 1, "text": "extra ١"},
+    }
+    bad_zip = tmp_path / "extra_qpc_verse.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("extra_qpc_verse.json", json.dumps(qpc_with_extra).encode("utf-8")))
+    with pytest.raises(ValueError, match="[Ee]xtra|[Mm]issing|verse"):
+        load_qpc_hafs_tajweed_words(bad_zip, ayah_keys=["1:1"])
+
+
+def test_task_3_2_pronunciations_rejects_extra_verse_or_keys(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qul_wbw_pronunciations
+
+    # Extra verse in transliteration
+    pron_extra = {
+        "1:1:1": "bismi",
+        "999:1:1": "extra",
+    }
+    bad_zip = tmp_path / "pron_extra_verse.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("pron_extra_verse.json", json.dumps(pron_extra).encode("utf-8")))
+    with pytest.raises(ValueError, match="[Ee]xtra|[Mm]issing|verse"):
+        load_qul_wbw_pronunciations(bad_zip, ayah_keys=["1:1"])
+
+    # Duplicate slot mismatch in 2:181
+    pron_dup_mismatch = {
+        "2:181:1": "faman", "2:181:2": "baddalahu", "2:181:3": "baʿdamā",
+        "2:181:5": "DIFFERENT", # slot 5 != slot 3
+        "2:181:7": "fa-innamā", "2:181:8": "ith'muhu", "2:181:9": "ʿalā",
+        "2:181:10": "alladhīna", "2:181:11": "yubaddilūnahu", "2:181:12": "inna",
+        "2:181:13": "l-laha", "2:181:14": "samīʿun", "2:181:15": "ʿalīmun",
+    }
+    bad_zip2 = tmp_path / "dup_mismatch.json.zip"
+    bad_zip2.write_bytes(_make_zip_bytes("dup_mismatch.json", json.dumps(pron_dup_mismatch).encode("utf-8")))
+    with pytest.raises(ValueError, match="duplicate"):
+        load_qul_wbw_pronunciations(bad_zip2, ayah_keys=["2:181"])
+
+def test_task_3_2_qpc_loader_rule_markup_and_nesting(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qpc_hafs_tajweed_words
+
+    # Valid nested rules: max depth 2
+    valid_qpc = {
+        "1:1": {
+            "id": 1,
+            "verse_key": "1:1",
+            "surah": 1,
+            "ayah": 1,
+            "text": "بِسۡمِ <rule class=ham_wasl>ٱ</rule>للَّهِ <rule class=ham_wasl>ٱ</rule><rule class=laam_shamsiyah>ل</rule>رَّحۡمَ<rule class=madda_normal>ـٰ</rule>نِ ١",
+        },
+        "7:206": {
+            "id": 206,
+            "verse_key": "7:206",
+            "surah": 7,
+            "ayah": 206,
+            "text": "وَلَهُۥ يَسۡجُدُونَ ۩ ٢٠٦",
+        },
+    }
+    qpc_zip = tmp_path / "qpc.json.zip"
+    qpc_zip.write_bytes(_make_zip_bytes("qpc.json", json.dumps(valid_qpc).encode("utf-8")))
+
+    words = load_qpc_hafs_tajweed_words(qpc_zip, ayah_keys=["1:1", "7:206"])
+    # In 1:1, terminal numeral omitted, leaving 3 words: بِسۡمِ, ٱللَّهِ, ٱلرَّحۡمَـٰنِ
+    assert len(words["1:1"]) == 3
+    # In 7:206, standalone ۩ omitted, terminal numeral omitted, leaving 2 words: وَلَهُۥ, يَسۡجُدُونَ
+    assert words["7:206"] == ["وَلَهُۥ", "يَسۡجُدُونَ"]
+
+    # Unmatched closing tag rejected
+    unmatched_qpc = {
+        "1:1": {
+            "id": 1, "verse_key": "1:1", "surah": 1, "ayah": 1,
+            "text": "بِسۡمِ </rule> ١",
+        }
+    }
+    unm_zip = tmp_path / "unmatched.json.zip"
+    unm_zip.write_bytes(_make_zip_bytes("unmatched.json", json.dumps(unmatched_qpc).encode("utf-8")))
+    with pytest.raises(ValueError, match="[Uu]nbalanced|[Tt]ag"):
+        load_qpc_hafs_tajweed_words(unm_zip, ayah_keys=["1:1"])
+
+
+def test_task_3_2_wbw_loader_shifted_2_181_and_pronunciations(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import (
+        load_qpc_hafs_tajweed_words,
+        load_qul_wbw_meanings,
+        load_qul_wbw_pronunciations,
+    )
+
+    # 1. 2:181 fixture
+    qpc_data = {
+        "2:181": {
+            "id": 181,
+            "verse_key": "2:181",
+            "surah": 2,
+            "ayah": 181,
+            "text": "فَمَنۢ بَدَّلَهُۥ بَعۡدَ مَا سَمِعَهُۥ فَإِنَّمَآ إِثۡمُهُۥ عَلَى ٱلَّذِينَ يُبَدِّلُونَهُۥٓ‌ۚ إِنَّ ٱللَّهَ سَمِيعٌ عَلِيمٌ ١٨١",
+        }
+    }
+    qpc_zip = tmp_path / "qpc.json.zip"
+    qpc_zip.write_bytes(_make_zip_bytes("qpc.json", json.dumps(qpc_data).encode("utf-8")))
+
+    meanings_data = {
+        "2:181:1": "Then whoever",
+        "2:181:2": "changes it",
+        "2:181:3": "after what",
+        "2:181:5": "he (has) heard [it]",
+        "2:181:6": "so only",
+        "2:181:7": "its sin",
+        "2:181:8": "(would be) on",
+        "2:181:9": "those who",
+        "2:181:10": "alter it",
+        "2:181:11": "Indeed",
+        "2:181:12": "Allah",
+        "2:181:13": "(is) All-Hearing",
+        "2:181:14": "All-Knowing",
+        "2:181:15": "(181)",
+    }
+    meanings_zip = tmp_path / "meanings.json.zip"
+    meanings_zip.write_bytes(_make_zip_bytes("meanings.json", json.dumps(meanings_data).encode("utf-8")))
+
+    pron_data = {
+        "2:181:1": "faman",
+        "2:181:2": "baddalahu",
+        "2:181:3": "baʿdamā",
+        "2:181:5": "baʿdamā",
+        "2:181:7": "fa-innamā",
+        "2:181:8": "ith'muhu",
+        "2:181:9": "ʿalā",
+        "2:181:10": "alladhīna",
+        "2:181:11": "yubaddilūnahu",
+        "2:181:12": "inna",
+        "2:181:13": "l-laha",
+        "2:181:14": "samīʿun",
+        "2:181:15": "ʿalīmun",
+    }
+    pron_zip = tmp_path / "pron.json.zip"
+    pron_zip.write_bytes(_make_zip_bytes("pron.json", json.dumps(pron_data).encode("utf-8")))
+
+    words = load_qpc_hafs_tajweed_words(qpc_zip, ayah_keys=["2:181"])["2:181"]
+    meanings = load_qul_wbw_meanings(meanings_zip, ayah_keys=["2:181"])["2:181"]
+    prons = load_qul_wbw_pronunciations(pron_zip, ayah_keys=["2:181"])["2:181"]
+
+    # In 2:181, 14 tokens minus terminal marker = 13 words; tokens 3 and 4 merged to 'بَعۡدَ مَا'
+    assert len(words) == 13
+    assert words[2] == "بَعۡدَ مَا"
+
+    # Meanings compacted from 1..3, 5..14 -> 1..13
+    assert len(meanings) == 13
+    # Word 4 shifted from raw 5: "he (has) heard [it]"
+    assert meanings[3] == (4, "he (has) heard [it]")
+    # Word 13 shifted from raw 14: "All-Knowing"
+    assert meanings[12] == (13, "All-Knowing")
+
+    # Pronunciations: word 4 is NULL, word 13 is "ʿalīmun" (from raw 15)
+    assert prons[4] is None
+    assert prons[13] == "ʿalīmun"
+    assert prons[1] == "faman"
+
+
+def test_task_3_2_wbw_pack_writer_and_fts(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import (
+        PACK_ID,
+        PACK_VERSION,
+        load_qpc_hafs_tajweed_words,
+        load_qul_wbw_meanings,
+        load_qul_wbw_pronunciations,
+        write_wbw_pack,
+    )
+
+    # Create minimal 1:1 and 2:181 fixture archives
+    qpc_data = {
+        "1:1": {
+            "id": 1,
+            "verse_key": "1:1",
+            "surah": 1,
+            "ayah": 1,
+            "text": "بِسۡمِ <rule class=ham_wasl>ٱ</rule>للَّهِ <rule class=ham_wasl>ٱ</rule><rule class=laam_shamsiyah>ل</rule>رَّحۡمَ<rule class=madda_normal>ـٰ</rule>نِ <rule class=ham_wasl>ٱ</rule><rule class=laam_shamsiyah>ل</rule>رَّح<rule class=madda_permissible>ِي</rule>مِ ١",
+        },
+        "2:181": {
+            "id": 188,
+            "verse_key": "2:181",
+            "surah": 2,
+            "ayah": 181,
+            "text": "فَمَنۢ بَدَّلَهُۥ بَعۡدَ مَا سَمِعَهُۥ فَإِنَّمَآ إِثۡمُهُۥ عَلَى ٱلَّذِينَ يُبَدِّلُونَهُۥٓ‌ۚ إِنَّ ٱللَّهَ سَمِيعٌ عَلِيمٌ ١٨١",
+        },
+    }
+    qpc_zip = tmp_path / "qpc.json.zip"
+    qpc_zip.write_bytes(_make_zip_bytes("qpc.json", json.dumps(qpc_data).encode("utf-8")))
+
+    meanings_data = {
+        "1:1:1": "In (the) name",
+        "1:1:2": "(of) Allah",
+        "1:1:3": "the Most Gracious",
+        "1:1:4": "the Most Merciful",
+        "1:1:5": "(1)",
+        "2:181:1": "Then whoever",
+        "2:181:2": "changes it",
+        "2:181:3": "after what",
+        "2:181:5": "he (has) heard [it]",
+        "2:181:6": "so only",
+        "2:181:7": "its sin",
+        "2:181:8": "(would be) on",
+        "2:181:9": "those who",
+        "2:181:10": "alter it",
+        "2:181:11": "Indeed",
+        "2:181:12": "Allah",
+        "2:181:13": "(is) All-Hearing",
+        "2:181:14": "All-Knowing",
+        "2:181:15": "(181)",
+    }
+    meanings_zip = tmp_path / "meanings.json.zip"
+    meanings_zip.write_bytes(_make_zip_bytes("meanings.json", json.dumps(meanings_data).encode("utf-8")))
+
+    pron_data = {
+        "1:1:1": "bis'mi",
+        "1:1:2": "l-lahi",
+        "1:1:3": "r-raḥmāni",
+        "1:1:4": "r-raḥīmi",
+        "2:181:1": "faman",
+        "2:181:2": "baddalahu",
+        "2:181:3": "baʿdamā",
+        "2:181:5": "baʿdamā",
+        "2:181:7": "fa-innamā",
+        "2:181:8": "ith'muhu",
+        "2:181:9": "ʿalā",
+        "2:181:10": "alladhīna",
+        "2:181:11": "yubaddilūnahu",
+        "2:181:12": "inna",
+        "2:181:13": "l-laha",
+        "2:181:14": "samīʿun",
+        "2:181:15": "ʿalīmun",
+    }
+    pron_zip = tmp_path / "pron.json.zip"
+    pron_zip.write_bytes(_make_zip_bytes("pron.json", json.dumps(pron_data).encode("utf-8")))
+
+    ayah_ids = {"1:1": 1, "2:181": 188}
+    target_keys = ["1:1", "2:181"]
+    ar_words = load_qpc_hafs_tajweed_words(qpc_zip, ayah_ids)
+    meanings = load_qul_wbw_meanings(meanings_zip, target_keys)
+    gloss_counts = {k: len(meanings[k]) for k in target_keys}
+    prons = load_qul_wbw_pronunciations(pron_zip, target_keys, expected_counts=gloss_counts)
+
+    repo_root = Path(__file__).resolve().parents[1]
+    schema_path = repo_root / "specs" / "sql" / "quran_wbw.v1.sql"
+    out_db = tmp_path / "quran-wbw-en.db"
+
+    metadata = {
+        "category": "quran",
+        "completeness": "complete",
+        "fts5_enabled": "1",
+        "id": PACK_ID,
+        "languages": "ar,en",
+        "license": "LicenseRef-QUL-Unreviewed",
+        "pack_version": PACK_VERSION,
+        "provenance": "QUL",
+        "schema_version": "1",
+    }
+    surah_ayah_sequence = [(1, 1, 1), (2, 181, 188)]
+    expected_words = len(ar_words["1:1"]) + len(ar_words["2:181"])
+    assert expected_words == 17
+
+    write_wbw_pack(
+        out_db,
+        schema_path,
+        metadata,
+        surah_ayah_sequence,
+        ar_words,
+        meanings,
+        prons,
+        expected_total_words=17,
+    )
+
+    assert out_db.is_file()
+    con = sqlite3.connect(f"{out_db.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        cur = con.cursor()
+        cur.execute("PRAGMA integrity_check;")
+        assert cur.fetchall() == [("ok",)]
+        # Verify pack metadata
+        cur.execute("SELECT key, value FROM pack_meta ORDER BY key;")
+        meta_rows = dict(cur.fetchall())
+        assert meta_rows["pack_version"] == "0.3.0"
+        assert meta_rows["languages"] == "ar,en"
+
+        # Verify coverage report
+        cur.execute("SELECT metric, count, notes FROM coverage_report ORDER BY metric;")
+        cov_rows = {row[0]: (row[1], row[2]) for row in cur.fetchall()}
+        assert cov_rows["expected_total"] == (17, None)
+        assert cov_rows["ar_present"] == (17, None)
+        assert cov_rows["en_present"] == (17, None)
+        assert cov_rows["en_missing"] == (0, None)
+
+        # Verify row counts and Arabic storage fidelity
+        cur.execute("SELECT COUNT(*) FROM word_translations;")
+        assert cur.fetchone() == (17,)
+
+        cur.execute("SELECT text_uthmani, translation, transliteration FROM word_translations WHERE word_key = '1:1:1';")
+        assert cur.fetchall() == [("بِسۡمِ", "In (the) name", "bis'mi")]
+
+        # Verify shifted 2:181:4 (gloss: 'he (has) heard [it]', pronunciation NULL)
+        cur.execute("SELECT text_uthmani, translation, transliteration FROM word_translations WHERE word_key = '2:181:4';")
+        assert cur.fetchall() == [("سَمِعَهُۥ", "he (has) heard [it]", None)]
+
+        # Verify shifted 2:181:13 (gloss: 'All-Knowing', transliteration: 'ʿalīmun')
+        cur.execute("SELECT text_uthmani, translation, transliteration FROM word_translations WHERE word_key = '2:181:13';")
+        assert cur.fetchall() == [("عَلِيمٌ", "All-Knowing", "ʿalīmun")]
+
+        # Verify FTS search matches
+        cur.execute(
+            "SELECT w.word_key FROM word_translations AS w "
+            "JOIN word_translations_fts AS fts ON fts.rowid = w.id "
+            "WHERE word_translations_fts MATCH 'heard';"
+        )
+        assert cur.fetchall() == [("2:181:4",)]
+
+        cur.execute(
+            "SELECT w.word_key FROM word_translations AS w "
+            "JOIN word_translations_fts AS fts ON fts.rowid = w.id "
+            "WHERE word_translations_fts MATCH '\"All-Knowing\"';"
+        )
+        assert cur.fetchall() == [("2:181:13",)]
+
+        cur.execute(
+            "SELECT w.word_key FROM word_translations AS w "
+            "JOIN word_translations_fts AS fts ON fts.rowid = w.id "
+            "WHERE word_translations_fts MATCH ?;",
+            ("ʿalīmun",),
+        )
+        assert cur.fetchall() == [("2:181:13",)]
+    finally:
+        con.close()
+
+
+def test_task_3_2_builder_cli_arg_handling() -> None:
+    from pipelines.builders.build_quran_wbw import main
+
+    assert main(["--sources-root", "/tmp/nonexistent_root_dir", "--output-dir", "/tmp/nonexistent_out_dir"]) == 2
+
+
+def test_task_3_2_qpc_loader_rejects_noncanonical_verse_key(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import load_qpc_hafs_tajweed_verses
+
+    bad_qpc = {
+        "01:1": {
+            "id": 1,
+            "verse_key": "01:1",
+            "surah": 1,
+            "ayah": 1,
+            "text": "بِسۡمِ ١",
+        }
+    }
+    bad_zip = tmp_path / "bad_qpc_leading_zero.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("bad_qpc_leading_zero.json", json.dumps(bad_qpc).encode("utf-8")))
+
+    with pytest.raises(ValueError, match="[Nn]on-canonical|[Cc]anonical"):
+        load_qpc_hafs_tajweed_verses(bad_zip, expected_ayah_ids=None)
+
+
+def test_task_3_2_stage_qul_file_directory_creation_race_safe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    content_root = tmp_path / "Contant"
+    raw_root = tmp_path / "raw-inputs"
+    rel_path = "wbw/english-wbw-translation.json.zip"
+
+    src_file = content_root / rel_path
+    src_file.parent.mkdir(parents=True, exist_ok=True)
+    zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
+    src_file.write_bytes(zip_bytes)
+
+    dest_parent = (raw_root / "qul" / rel_path).parent
+    dest_parent.mkdir(parents=True, exist_ok=True)
+
+    orig_exists = Path.exists
+
+    def race_exists(self: Path) -> bool:
+        if self == dest_parent:
+            return False
+        return orig_exists(self)
+
+    monkeypatch.setattr(Path, "exists", race_exists)
+
+    out_path = stage_qul_file(
+        content_root=content_root,
+        raw_root=raw_root,
+        rel_path=rel_path,
+        expected_sha256=None,
+    )
+    assert out_path.exists()
+
+
+def test_task_3_2_loaders_mismatch_diagnostics_include_missing_and_extra(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_wbw import (
+        load_qpc_hafs_tajweed_verses,
+        load_qul_wbw_meanings,
+        load_qul_wbw_pronunciations,
+    )
+
+    # 1. QPC verse set mismatch
+    qpc_data = {
+        "1:1": {"id": 1, "verse_key": "1:1", "surah": 1, "ayah": 1, "text": "text 1"},
+        "1:3": {"id": 3, "verse_key": "1:3", "surah": 1, "ayah": 3, "text": "text 3"},
+    }
+    qpc_zip = tmp_path / "qpc_mismatch.json.zip"
+    qpc_zip.write_bytes(_make_zip_bytes("qpc_mismatch.json", json.dumps(qpc_data).encode("utf-8")))
+
+    with pytest.raises(ValueError) as exc_qpc:
+        load_qpc_hafs_tajweed_verses(qpc_zip, expected_ayah_ids={"1:1": 1, "1:2": 2})
+    msg_qpc = str(exc_qpc.value)
+    assert "missing=" in msg_qpc and "extra=" in msg_qpc
+    assert "1:2" in msg_qpc and "1:3" in msg_qpc
+
+    # 2. WBW meanings verse set mismatch
+    meanings_data = {
+        "1:1:1": "In", "1:1:2": "(1)",
+        "1:3:1": "The", "1:3:2": "(3)",
+    }
+    meanings_zip = tmp_path / "meanings_mismatch.json.zip"
+    meanings_zip.write_bytes(_make_zip_bytes("meanings_mismatch.json", json.dumps(meanings_data).encode("utf-8")))
+
+    with pytest.raises(ValueError) as exc_meanings:
+        load_qul_wbw_meanings(meanings_zip, ayah_keys=["1:1", "1:2"])
+    msg_meanings = str(exc_meanings.value)
+    assert "missing=" in msg_meanings and "extra=" in msg_meanings
+    assert "1:2" in msg_meanings and "1:3" in msg_meanings
+
+    # 3. WBW transliteration verse set mismatch
+    pron_data = {
+        "1:1:1": "bismi",
+        "1:3:1": "al-rahmani",
+    }
+    pron_zip = tmp_path / "pron_mismatch.json.zip"
+    pron_zip.write_bytes(_make_zip_bytes("pron_mismatch.json", json.dumps(pron_data).encode("utf-8")))
+
+    with pytest.raises(ValueError) as exc_pron:
+        load_qul_wbw_pronunciations(pron_zip, ayah_keys=["1:1", "1:2"])
+    msg_pron = str(exc_pron.value)
+    assert "missing=" in msg_pron and "extra=" in msg_pron
+    assert "1:2" in msg_pron and "1:3" in msg_pron

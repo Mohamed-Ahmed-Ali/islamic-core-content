@@ -32,6 +32,8 @@ def load_quran_pack(
     expected_paths: frozenset[str],
     *,
     fts_enabled: bool,
+    pack_version: str = "0.1.0",
+    completeness: str = "complete",
 ) -> tuple[Path, dict[str, str]]:
     """Verify pack lock and license, returning (raw_root, pack_metadata)."""
     sources_root = Path(sources_root)
@@ -53,8 +55,8 @@ def load_quran_pack(
         sources_root,
         pack_id,
         entries,
-        pack_version="0.1.0",
-        completeness="complete",
+        pack_version=pack_version,
+        completeness=completeness,
         fts5_enabled=fts_enabled,
     )
     return raw_root, metadata
