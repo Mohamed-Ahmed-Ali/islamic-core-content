@@ -1131,3 +1131,136 @@ def test_task_3_2_loaders_mismatch_diagnostics_include_missing_and_extra(tmp_pat
     msg_pron = str(exc_pron.value)
     assert "missing=" in msg_pron and "extra=" in msg_pron
     assert "1:2" in msg_pron and "1:3" in msg_pron
+
+
+# ---------------------------------------------------------------------------
+# Task 3.3: Word alignment validator
+# ---------------------------------------------------------------------------
+
+def _create_alignment_test_dbs(
+    tmp_path: Path,
+    ayahs: list[tuple[int, str]],
+    morph_words: list[tuple[int, int, str]],
+    wbw_words: list[tuple[int, int, str]],
+) -> tuple[Path, Path, Path]:
+    core_path = tmp_path / "quran-core.db"
+    morph_path = tmp_path / "quran-morphology.db"
+    wbw_path = tmp_path / "quran-wbw-en.db"
+
+    with sqlite3.connect(core_path) as conn:
+        conn.execute("CREATE TABLE ayahs (id INTEGER PRIMARY KEY, verse_key TEXT NOT NULL UNIQUE);")
+        conn.executemany("INSERT INTO ayahs (id, verse_key) VALUES (?, ?);", ayahs)
+
+    with sqlite3.connect(morph_path) as conn:
+        conn.execute(
+            "CREATE TABLE words (id INTEGER PRIMARY KEY, ayah_id INTEGER NOT NULL, word_number INTEGER NOT NULL, word_key TEXT NOT NULL UNIQUE);"
+        )
+        conn.executemany(
+            "INSERT INTO words (ayah_id, word_number, word_key) VALUES (?, ?, ?);",
+            morph_words,
+        )
+
+    with sqlite3.connect(wbw_path) as conn:
+        conn.execute(
+            "CREATE TABLE word_translations (id INTEGER PRIMARY KEY, ayah_id INTEGER NOT NULL, word_number INTEGER NOT NULL, word_key TEXT NOT NULL UNIQUE);"
+        )
+        conn.executemany(
+            "INSERT INTO word_translations (ayah_id, word_number, word_key) VALUES (?, ?, ?);",
+            wbw_words,
+        )
+
+    return core_path, morph_path, wbw_path
+
+
+def test_task_3_3_word_alignment_aligned_happy_path(tmp_path: Path) -> None:
+    from pipelines.validators.word_alignment import validate_word_alignment
+
+    ayahs = [(1, "1:1"), (2, "1:2")]
+    morph_words = [
+        (1, 1, "1:1:1"), (1, 2, "1:1:2"), (1, 3, "1:1:3"), (1, 4, "1:1:4"),
+        (2, 1, "1:2:1"), (2, 2, "1:2:2"),
+    ]
+    wbw_words = list(morph_words)
+
+    core_p, morph_p, wbw_p = _create_alignment_test_dbs(tmp_path, ayahs, morph_words, wbw_words)
+    res = validate_word_alignment(core_p, morph_p, wbw_p)
+    assert res is None
+
+
+def test_task_3_3_word_alignment_equal_total_displaced_key_mismatch(tmp_path: Path) -> None:
+    from pipelines.validators.word_alignment import validate_word_alignment
+
+    ayahs = [(1, "1:1")]
+    morph_words = [(1, 1, "1:1:1"), (1, 2, "1:1:2")]
+    wbw_words = [(1, 1, "1:1:1"), (1, 2, "1:1:3")]  # Equal count (2), but displaced key at ordinal 2
+
+    core_p, morph_p, wbw_p = _create_alignment_test_dbs(tmp_path, ayahs, morph_words, wbw_words)
+    with pytest.raises(ValueError) as exc:
+        validate_word_alignment(core_p, morph_p, wbw_p)
+
+    err_msg = str(exc.value)
+    assert "1:1" in err_msg
+    assert "QAC=2 QUL=2 delta=0" in err_msg
+    assert "missing ordinals:" in err_msg
+    assert "extra ordinals:" in err_msg
+    assert "2" in err_msg
+
+
+def test_task_3_3_word_alignment_multi_ayah_mismatch_numeric_order(tmp_path: Path) -> None:
+    from pipelines.validators.word_alignment import validate_word_alignment
+
+    ayahs = [(1, "1:1"), (2, "1:2"), (3, "1:3")]
+    # Ayah 1: QAC has 4 words, QUL has 3 words (missing word 4, delta = -1)
+    # Ayah 2: Aligned (2 words each)
+    # Ayah 3: QAC has 2 words, QUL has 3 words (extra word 3, delta = 1)
+    morph_words = [
+        (1, 1, "1:1:1"), (1, 2, "1:1:2"), (1, 3, "1:1:3"), (1, 4, "1:1:4"),
+        (2, 1, "1:2:1"), (2, 2, "1:2:2"),
+        (3, 1, "1:3:1"), (3, 2, "1:3:2"),
+    ]
+    wbw_words = [
+        (1, 1, "1:1:1"), (1, 2, "1:1:2"), (1, 3, "1:1:3"),
+        (2, 1, "1:2:1"), (2, 2, "1:2:2"),
+        (3, 1, "1:3:1"), (3, 2, "1:3:2"), (3, 3, "1:3:3"),
+    ]
+
+    core_p, morph_p, wbw_p = _create_alignment_test_dbs(tmp_path, ayahs, morph_words, wbw_words)
+    with pytest.raises(ValueError) as exc:
+        validate_word_alignment(core_p, morph_p, wbw_p)
+
+    err_msg = str(exc.value)
+    # Ayah 2 should not be in the mismatch report
+    assert "1:2" not in err_msg
+
+    # Both Ayah 1 and Ayah 3 must be in error report
+    assert "1:1" in err_msg
+    assert "1:3" in err_msg
+
+    # Per-ayah diagnostics in numeric order: Ayah 1 precedes Ayah 3
+    pos_1_1 = err_msg.find("1:1")
+    pos_1_3 = err_msg.find("1:3")
+    assert 0 <= pos_1_1 < pos_1_3
+
+    # Check diagnostics contents
+    assert "QAC=4 QUL=3 delta=-1" in err_msg
+    assert "QAC=2 QUL=3 delta=1" in err_msg
+    assert "missing ordinals:" in err_msg
+    assert "extra ordinals:" in err_msg
+
+
+def test_task_3_3_word_alignment_missing_file_and_empty_core(tmp_path: Path) -> None:
+    from pipelines.validators.word_alignment import validate_word_alignment
+
+    non_existent = tmp_path / "does_not_exist.db"
+    core_p, morph_p, wbw_p = _create_alignment_test_dbs(tmp_path, [(1, "1:1")], [(1, 1, "1:1:1")], [(1, 1, "1:1:1")])
+
+    with pytest.raises(FileNotFoundError):
+        validate_word_alignment(non_existent, morph_p, wbw_p)
+
+    # Empty core
+    empty_core = tmp_path / "empty_core.db"
+    with sqlite3.connect(empty_core) as conn:
+        conn.execute("CREATE TABLE ayahs (id INTEGER PRIMARY KEY, verse_key TEXT NOT NULL UNIQUE);")
+    with pytest.raises(ValueError, match="contains no ayahs"):
+        validate_word_alignment(empty_core, morph_p, wbw_p)
+
