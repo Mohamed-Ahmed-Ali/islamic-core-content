@@ -158,6 +158,7 @@ Data is split into granular, independently downloadable packs so apps only downl
 | `quran-core` | SQLite | `none` | Tanzil XML | Exact-file notices and reviewed transformation rights |
 | `quran-scripts-extended` | SQLite | `none` | Tanzil XML (4 alt scripts) | Exact-file notices and reviewed transformation rights |
 | `quran-tr-en-pickthall` | SQLite | `none` | Tanzil XML | Not cleared for v0.1.0 |
+| `quran-tr-en-sahih` | SQLite | `none` | QUL Saheeh International JSON with verse HTML and footnotes | Pending; local only |
 | `quran-tafsir-ar-jalalayn` | SQLite | `none` | Tanzil XML | Not cleared for v0.1.0 |
 | `quran-tafsir-{lang}-{slug}` | SQLite | `none` | QUL JSON | Audited per-pack |
 | `quran-wbw-{lang}` | SQLite | `none` | QUL JSON | Audited per-pack |
@@ -166,6 +167,8 @@ Data is split into granular, independently downloadable packs so apps only downl
 | `hadith-{book}` | SQLite | `none` | Sunnah.com JSON | Audited per-pack |
 | `audio-adhan-core` | M4A + CAF | Native audio | Six Adhan masters | None cleared for v0.1.0 |
 | `audio-recitation-{qari}` | Manifest + SQLite segments | `none` | QUL JSON | Remote audio URLs + local timing index |
+
+Al-Qurtubi maps all 6,236 verses, including the two source-empty entries at `34:54` and `59:19`. It preserves the source HTML and reports `ar_present=6234` with partial completeness. Saheeh stores verse HTML and note bodies separately; its search index excludes footnote markers and note text.
 
 > **Compression Strategy:** Release v1 publishes uncompressed `.db` files for zero-friction direct download on all mobile runtimes. Optional `.db.gz` or `.zip` variants may be added in a later minor release once verified across Android and iOS extraction pipelines.
 

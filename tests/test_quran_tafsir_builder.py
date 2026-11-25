@@ -674,6 +674,7 @@ def _setup_qul_tafsir_pack_env(
     *,
     pack_id: str = "quran-tafsir-ar-ibn-kathir",
     language: str = "ar",
+    custom_entries: dict[str, Any] | None = None,
 ) -> tuple[Path, Path]:
     import zipfile
     from tests.fixtures.tanzil import build_synthetic_metadata_xml
@@ -713,6 +714,9 @@ def _setup_qul_tafsir_pack_env(
                 continue
         qul_data[vk] = {"text": f"<p>Tafsir for {vk}</p>"}
         idx += 1
+    if custom_entries:
+        qul_data.update(custom_entries)
+
 
     from pipelines.builders.build_quran_tafsir import SUPPORTED_TAFSIR_PACKS
     source_rel = SUPPORTED_TAFSIR_PACKS[pack_id]["source_path"]
@@ -866,3 +870,93 @@ def test_build_quran_tafsir_qul_en_ibn_kathir_success(tmp_path: Path) -> None:
         assert "ar_present" not in cov
     finally:
         conn.close()
+
+def test_build_quran_tafsir_qurtubi_empty_markup_partial_coverage(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_tafsir import main
+
+    pack_id = "quran-tafsir-ar-qurtubi"
+    empty_markup = "<div class=ar lang=ar></div>"
+    custom_entries = {
+        "34:54": {"text": empty_markup},
+        "59:19": {"text": empty_markup},
+    }
+    sources_root, out_dir = _setup_qul_tafsir_pack_env(
+        tmp_path, pack_id=pack_id, custom_entries=custom_entries
+    )
+    db_path = out_dir / f"{pack_id}.db"
+
+    ret = main([
+        "--sources-root", str(sources_root),
+        "--output-dir", str(out_dir),
+        "--pack", pack_id,
+    ])
+    assert ret == 0
+    assert db_path.is_file()
+
+    conn = _open_ro_db(db_path)
+    try:
+        integrity = conn.execute("PRAGMA integrity_check;").fetchall()
+        assert integrity == [("ok",)]
+        fk_check = conn.execute("PRAGMA foreign_key_check;").fetchall()
+        assert fk_check == []
+
+        # Check preserved empty markup and empty projection
+        rows = dict(
+            conn.execute(
+                "SELECT group_key, (text || '|||' || text_search) FROM tafsir_entries WHERE group_key IN ('34:54', '59:19');"
+            ).fetchall()
+        )
+        assert len(rows) == 2
+        assert rows["34:54"] == f"{empty_markup}|||"
+        assert rows["59:19"] == f"{empty_markup}|||"
+
+        # Verify mapping covers all 6236 ayahs
+        map_count = conn.execute("SELECT COUNT(*) FROM tafsir_ayah_map;").fetchone()[0]
+        assert map_count == 6236
+
+        # Verify mappings for 34:54 and 59:19 exist
+        mapped_34_54 = conn.execute(
+            "SELECT m.ayah_id, e.group_key, e.text FROM tafsir_ayah_map m "
+            "JOIN tafsir_entries e ON m.entry_id = e.id WHERE m.verse_key = '34:54';"
+        ).fetchone()
+        assert mapped_34_54 is not None
+        assert mapped_34_54[1] == "34:54"
+        assert mapped_34_54[2] == empty_markup
+
+        mapped_59_19 = conn.execute(
+            "SELECT m.ayah_id, e.group_key, e.text FROM tafsir_ayah_map m "
+            "JOIN tafsir_entries e ON m.entry_id = e.id WHERE m.verse_key = '59:19';"
+        ).fetchone()
+        assert mapped_59_19 is not None
+        assert mapped_59_19[1] == "59:19"
+        assert mapped_59_19[2] == empty_markup
+
+        # Pack metadata must be completeness=partial
+        meta = dict(conn.execute("SELECT key, value FROM pack_meta;").fetchall())
+        assert meta["pack_id"] == pack_id
+        assert meta["completeness"] == "partial"
+
+        # Coverage report must have expected_total=6236 and ar_present=6234
+        cov = dict(conn.execute("SELECT metric, count FROM coverage_report;").fetchall())
+        assert cov["expected_total"] == 6236
+        assert cov["ar_present"] == 6234
+    finally:
+        conn.close()
+
+
+def test_build_grouped_tafsir_rows_empty_projection_still_rejected(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_tafsir import build_grouped_tafsir_rows
+
+    p = tmp_path / "empty_markup_grouped.json"
+    p.write_text(
+        json.dumps([
+            {
+                "verse_keys": ["1:1"],
+                "text": "<div class=ar lang=ar></div>",
+                "format": "html",
+            }
+        ]),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Projected search text is empty or blank"):
+        build_grouped_tafsir_rows(p, {"1:1": 1}, language="ar")

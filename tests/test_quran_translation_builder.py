@@ -736,3 +736,96 @@ def test_build_quran_translation_sahih_orphan_and_lost_footnotes_rejected(tmp_pa
     author_lock(s3 / "sources" / "registry.json", s3 / "raw-inputs", s3 / "sources" / "manifest.lock.json")
     with pytest.raises(ValueError, match="duplicate|reference"):
         build_quran_translation(s3, o3, pack_id="quran-tr-en-sahih")
+
+def test_build_quran_translation_sahih_footnote_pk_order_and_truthful_coverage(tmp_path: Path) -> None:
+    import zipfile
+    from pipelines.builders.build_quran_translation import build_quran_translation
+
+    env = tmp_path / "env_pk_order"
+    sources_root, out_dir = _setup_sahih_pack_env(env)
+    z_path = sources_root / "raw-inputs" / "qul" / "translation" / "en-sahih-international-with-footnote-tags.json.zip"
+    with zipfile.ZipFile(z_path, "r") as zf:
+        data = json.loads(zf.read("en-sahih-international-with-footnote-tags.json"))
+
+    # Verse 1:1 has footnote 20 before footnote 10 in verse marker display order
+    data["1:1"]["t"] = 'Translation of 1:1 <sup foot_note="20">2</sup> and <sup foot_note="10">1</sup>.'
+    data["1:1"]["f"] = {"20": "Note twenty", "10": "Note ten"}
+
+    # Verse 7:143 has non-blank body (sole pinned blank absent)
+    data["7:143"]["t"] = 'Translation of 7:143 <sup foot_note="226798">1</sup>.'
+    data["7:143"]["f"] = {"226798": "Non-blank body"}
+
+    with zipfile.ZipFile(z_path, "w") as zf:
+        zf.writestr("en-sahih-international-with-footnote-tags.json", json.dumps(data, indent=2).encode("utf-8"))
+    author_lock(sources_root / "sources" / "registry.json", sources_root / "raw-inputs", sources_root / "sources" / "manifest.lock.json")
+
+    build_quran_translation(sources_root, out_dir, pack_id="quran-tr-en-sahih")
+    db_path = out_dir / "quran-tr-en-sahih.db"
+    conn = _open_ro_db(db_path)
+    try:
+        # 1. Verse display marker order is unchanged in translations.text
+        t_row = conn.execute("SELECT text FROM translations WHERE ayah_id=1;").fetchone()
+        assert t_row[0] == 'Translation of 1:1 <sup foot_note="20">2</sup> and <sup foot_note="10">1</sup>.'
+
+        # 2. Footnotes are inserted in primary-key integer order (ayah_id, footnote_id)
+        fn_rows = conn.execute("SELECT footnote_id, text FROM translation_footnotes WHERE ayah_id=1;").fetchall()
+        assert fn_rows == [(10, "Note ten"), (20, "Note twenty")]
+
+        # 3. Truthful coverage: source_blank_footnotes is absent when sole blank is absent
+        cov = dict(conn.execute("SELECT metric, count FROM coverage_report;").fetchall())
+        assert "source_blank_footnotes" not in cov
+    finally:
+        conn.close()
+
+
+def test_build_quran_translation_sahih_whitespace_footnote_rejected(tmp_path: Path) -> None:
+    import zipfile
+    from pipelines.builders.build_quran_translation import build_quran_translation
+
+    env = tmp_path / "env_whitespace_fn"
+    sources_root, out_dir = _setup_sahih_pack_env(env)
+    z_path = sources_root / "raw-inputs" / "qul" / "translation" / "en-sahih-international-with-footnote-tags.json.zip"
+    with zipfile.ZipFile(z_path, "r") as zf:
+        data = json.loads(zf.read("en-sahih-international-with-footnote-tags.json"))
+    data["7:143"]["f"]["226798"] = "   "
+    with zipfile.ZipFile(z_path, "w") as zf:
+        zf.writestr("en-sahih-international-with-footnote-tags.json", json.dumps(data, indent=2).encode("utf-8"))
+    author_lock(sources_root / "sources" / "registry.json", sources_root / "raw-inputs", sources_root / "sources" / "manifest.lock.json")
+
+    with pytest.raises(ValueError, match="whitespace"):
+        build_quran_translation(sources_root, out_dir, pack_id="quran-tr-en-sahih")
+
+
+def test_build_quran_translation_sahih_newline_footnote_id_rejected(tmp_path: Path) -> None:
+    import zipfile
+    from pipelines.builders.build_quran_translation import build_quran_translation
+
+    # 1. Newline in <sup> tag foot_note attribute
+    env1 = tmp_path / "env_newline_tag"
+    s1, o1 = _setup_sahih_pack_env(env1)
+    z1 = s1 / "raw-inputs" / "qul" / "translation" / "en-sahih-international-with-footnote-tags.json.zip"
+    with zipfile.ZipFile(z1, "r") as zf:
+        d1 = json.loads(zf.read("en-sahih-international-with-footnote-tags.json"))
+    d1["1:1"]["t"] = 'Translation of 1:1 <sup foot_note="1\n">1</sup>.'
+    d1["1:1"]["f"] = {"1\n": "Note 1"}
+    with zipfile.ZipFile(z1, "w") as zf:
+        zf.writestr("en-sahih-international-with-footnote-tags.json", json.dumps(d1, indent=2).encode("utf-8"))
+    author_lock(s1 / "sources" / "registry.json", s1 / "raw-inputs", s1 / "sources" / "manifest.lock.json")
+
+    with pytest.raises(ValueError, match="Invalid footnote ID"):
+        build_quran_translation(s1, o1, pack_id="quran-tr-en-sahih")
+
+    # 2. Newline in footnote dictionary key
+    env2 = tmp_path / "env_newline_key"
+    s2, o2 = _setup_sahih_pack_env(env2)
+    z2 = s2 / "raw-inputs" / "qul" / "translation" / "en-sahih-international-with-footnote-tags.json.zip"
+    with zipfile.ZipFile(z2, "r") as zf:
+        d2 = json.loads(zf.read("en-sahih-international-with-footnote-tags.json"))
+    d2["1:1"]["t"] = 'Translation of 1:1 <sup foot_note="1">1</sup>.'
+    d2["1:1"]["f"] = {"1\n": "Note 1"}
+    with zipfile.ZipFile(z2, "w") as zf:
+        zf.writestr("en-sahih-international-with-footnote-tags.json", json.dumps(d2, indent=2).encode("utf-8"))
+    author_lock(s2 / "sources" / "registry.json", s2 / "raw-inputs", s2 / "sources" / "manifest.lock.json")
+
+    with pytest.raises(ValueError, match="positive canonical decimal"):
+        build_quran_translation(s2, o2, pack_id="quran-tr-en-sahih")

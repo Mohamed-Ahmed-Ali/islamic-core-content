@@ -110,12 +110,14 @@ def _make_tafsir_entry_row(
     text_format: str,
     language: str,
     members: list[tuple[int, str]],
+    allow_blank_text_search: bool = False,
 ) -> TafsirEntryRow:
     """Construct TafsirEntryRow deriving start/id/end from members."""
     text_search = project_tafsir_text(text, text_format=text_format, language=language)
     if not text_search.strip():
-        raise ValueError(f"Projected search text is empty or blank for group {group_key!r}")
-
+        if not allow_blank_text_search:
+            raise ValueError(f"Projected search text is empty or blank for group {group_key!r}")
+        text_search = ""
     entry_id = members[0][0]
     return TafsirEntryRow(
         id=entry_id,
@@ -375,6 +377,7 @@ def parse_qul_tafsir_data(
             text_format="html",
             language=language,
             members=members,
+            allow_blank_text_search=True,
         )
         entries.append(entry)
         for aid, vk in members:
@@ -451,9 +454,16 @@ def build_quran_tafsir(
     else:
         raise ValueError(f"Unknown pack kind: {cfg['kind']!r}")
 
+    expected_total = len(coords.ayah_ids)
+    entry_has_text = {e.id: bool(e.text_search.strip()) for e in entries}
+    present_count = sum(1 for m in map_rows if entry_has_text[m.entry_id])
+
+    completeness = "partial" if present_count < expected_total else "complete"
+    metadata["completeness"] = completeness
+
     coverage: dict[str, tuple[int, str | None]] = {
-        "expected_total": (6236, None),
-        cfg["coverage_metric"]: (6236, None),
+        "expected_total": (expected_total, None),
+        cfg["coverage_metric"]: (present_count, None),
     }
 
     repo_root = Path(__file__).resolve().parents[2]

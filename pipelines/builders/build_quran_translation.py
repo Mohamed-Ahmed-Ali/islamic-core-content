@@ -39,7 +39,7 @@ SUPPORTED_TRANSLATION_PACKS: dict[str, dict[str, Any]] = {
 }
 SUPPORTED_PACK_IDS: tuple[str, ...] = tuple(SUPPORTED_TRANSLATION_PACKS.keys())
 EXPECTED_PATHS = SUPPORTED_TRANSLATION_PACKS[DEFAULT_PACK_ID]["expected_paths"]
-_POSITIVE_DECIMAL_KEY_RE = re.compile(r"^[1-9][0-9]*$")
+_POSITIVE_DECIMAL_KEY_RE = re.compile(r"^[1-9][0-9]*\Z")
 
 
 class SahihVerseHtmlParser(HTMLParser):
@@ -57,7 +57,7 @@ class SahihVerseHtmlParser(HTMLParser):
             if "foot_note" not in attrs_dict:
                 raise ValueError("<sup> tag missing required 'foot_note' attribute")
             fn_id = attrs_dict["foot_note"]
-            if fn_id is None or not _POSITIVE_DECIMAL_KEY_RE.match(fn_id):
+            if fn_id is None or not _POSITIVE_DECIMAL_KEY_RE.fullmatch(fn_id):
                 raise ValueError(f"Invalid footnote ID in <sup> tag: {fn_id!r}")
             self.refs.append(fn_id)
             self._in_sup = True
@@ -91,7 +91,7 @@ class SahihTranslationPayload:
     translations_text: dict[str, str]
     translations_text_search: dict[str, str]
     footnotes: list[tuple[str, int, str]]
-
+    blank_footnotes: tuple[str, ...] = ()
 def parse_sahih_translation_data(
     data: Any,
     expected_verse_keys: set[str],
@@ -111,7 +111,7 @@ def parse_sahih_translation_data(
     translations_text: dict[str, str] = {}
     translations_text_search: dict[str, str] = {}
     footnotes: list[tuple[str, int, str]] = []
-
+    blank_footnotes: list[str] = []
     for vkey, val in data.items():
         if not isinstance(val, dict):
             raise ValueError(f"Verse {vkey!r} value must be a dict, got {type(val).__name__}")
@@ -133,6 +133,29 @@ def parse_sahih_translation_data(
         if len(parser.refs) != len(set(parser.refs)):
             raise ValueError(f"Verse {vkey!r} contains duplicate footnote references: {parser.refs}")
 
+        verse_footnotes: dict[str, str] = {}
+        for fk, fv in f.items():
+            if not isinstance(fk, str) or not _POSITIVE_DECIMAL_KEY_RE.fullmatch(fk):
+                raise ValueError(
+                    f"Verse {vkey!r} footnote key {fk!r} is not a positive canonical decimal string"
+                )
+            if not isinstance(fv, str):
+                raise ValueError(
+                    f"Verse {vkey!r} footnote value for key {fk!r} must be a string, got {type(fv).__name__}"
+                )
+            if not fv:
+                if vkey == "7:143" and fk == "226798":
+                    blank_footnotes.append(f"{vkey}:{fk}")
+                else:
+                    raise ValueError(
+                        f"Verse {vkey!r} footnote {fk!r} has blank body, which is only allowed at verse 7:143 footnote 226798"
+                    )
+            elif not fv.strip():
+                raise ValueError(
+                    f"Verse {vkey!r} footnote {fk!r} has whitespace-only body"
+                )
+            verse_footnotes[fk] = fv
+
         ref_set = set(parser.refs)
         f_keys_set = set(f.keys())
         if ref_set != f_keys_set:
@@ -142,26 +165,6 @@ def parse_sahih_translation_data(
                 f"Footnote reference and body mismatch in verse {vkey!r}. "
                 f"References without body: {missing_refs}, bodies without reference: {missing_bodies}"
             )
-
-        verse_footnotes: dict[str, str] = {}
-        for fk, fv in f.items():
-            if not isinstance(fk, str) or not _POSITIVE_DECIMAL_KEY_RE.match(fk):
-                raise ValueError(
-                    f"Verse {vkey!r} footnote key {fk!r} is not a positive canonical decimal string"
-                )
-            if not isinstance(fv, str):
-                raise ValueError(
-                    f"Verse {vkey!r} footnote value for key {fk!r} must be a string, got {type(fv).__name__}"
-                )
-            if not fv.strip():
-                if vkey == "7:143" and fk == "226798":
-                    fv = ""
-                else:
-                    raise ValueError(
-                        f"Verse {vkey!r} footnote {fk!r} has blank body, which is only allowed at verse 7:143 footnote 226798"
-                    )
-            verse_footnotes[fk] = fv
-
         translations_text[vkey] = t
         translations_text_search[vkey] = parser.text_search
 
@@ -172,6 +175,7 @@ def parse_sahih_translation_data(
         translations_text=translations_text,
         translations_text_search=translations_text_search,
         footnotes=footnotes,
+        blank_footnotes=tuple(blank_footnotes),
     )
 
 def build_quran_translation(
@@ -222,7 +226,12 @@ def build_quran_translation(
         "en_missing": (0, None),
     }
     if pack_id == "quran-tr-en-sahih":
-        coverage["source_blank_footnotes"] = (1, "7:143:226798")
+        assert sahih_payload is not None
+        if sahih_payload.blank_footnotes:
+            coverage["source_blank_footnotes"] = (
+                len(sahih_payload.blank_footnotes),
+                ",".join(sahih_payload.blank_footnotes),
+            )
 
     repo_root = Path(__file__).resolve().parents[2]
     schema_path = repo_root / "specs" / "sql" / cfg["schema_file"]
@@ -258,16 +267,17 @@ def build_quran_translation(
                 _sahih_param_stream(),
             )
 
-            def _footnote_param_stream():
-                for vkey, fn_id, fn_text in sahih_payload.footnotes:
-                    aid = coords.ayah_ids[vkey]
-                    yield (aid, fn_id, fn_text)
+            sorted_footnote_params = [
+                (coords.ayah_ids[vkey], fn_id, fn_text)
+                for vkey, fn_id, fn_text in sahih_payload.footnotes
+            ]
+            sorted_footnote_params.sort(key=lambda r: (r[0], r[1]))
 
             conn.executemany(
                 "INSERT INTO translation_footnotes ("
                 "ayah_id, footnote_id, text"
                 ") VALUES (?, ?, ?);",
-                _footnote_param_stream(),
+                sorted_footnote_params,
             )
         else:
             def _translation_param_stream():
