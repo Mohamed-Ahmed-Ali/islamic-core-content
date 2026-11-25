@@ -12,6 +12,7 @@ from typing import Any, NamedTuple
 from jsonschema import Draft202012Validator, ValidationError
 
 from pipelines.common.lock_inputs import parse_strict_json
+from pipelines.common.qul_input import read_zip_strict_json
 from pipelines.common.quran_pack import load_quran_pack, write_quran_pack
 from pipelines.common.search_text import project_tafsir_text
 from pipelines.common.tanzil_coordinates import (
@@ -20,12 +21,69 @@ from pipelines.common.tanzil_coordinates import (
 )
 from pipelines.toolchain.check_runtime import verify_runtime
 
-PACK_ID = "quran-tafsir-ar-jalalayn"
-EXPECTED_PATHS = frozenset({
-    "tanzil/quran-data-Tanzil.xml",
-    "tanzil/ar.jalalayn.xml",
-})
+DEFAULT_PACK_ID = "quran-tafsir-ar-jalalayn"
+PACK_ID = DEFAULT_PACK_ID
 
+SUPPORTED_TAFSIR_PACKS: dict[str, dict[str, Any]] = {
+    "quran-tafsir-ar-jalalayn": {
+        "format": "plain",
+        "language": "ar",
+        "kind": "tanzil",
+        "source_path": "tanzil/ar.jalalayn.xml",
+        "expected_paths": frozenset({"tanzil/quran-data-Tanzil.xml", "tanzil/ar.jalalayn.xml"}),
+        "coverage_metric": "ar_present",
+    },
+    "quran-tafsir-ar-ibn-kathir": {
+        "format": "html",
+        "language": "ar",
+        "kind": "qul",
+        "source_path": "qul/tafsir/ar-tafsir-ibn-kathir.json.zip",
+        "expected_paths": frozenset({"tanzil/quran-data-Tanzil.xml", "qul/tafsir/ar-tafsir-ibn-kathir.json.zip"}),
+        "coverage_metric": "ar_present",
+    },
+    "quran-tafsir-ar-tabari": {
+        "format": "html",
+        "language": "ar",
+        "kind": "qul",
+        "source_path": "qul/tafsir/ar-tafsir-al-tabari.json.zip",
+        "expected_paths": frozenset({"tanzil/quran-data-Tanzil.xml", "qul/tafsir/ar-tafsir-al-tabari.json.zip"}),
+        "coverage_metric": "ar_present",
+    },
+    "quran-tafsir-ar-qurtubi": {
+        "format": "html",
+        "language": "ar",
+        "kind": "qul",
+        "source_path": "qul/tafsir/ar-tafseer-al-qurtubi.json.zip",
+        "expected_paths": frozenset({"tanzil/quran-data-Tanzil.xml", "qul/tafsir/ar-tafseer-al-qurtubi.json.zip"}),
+        "coverage_metric": "ar_present",
+    },
+    "quran-tafsir-ar-wasit": {
+        "format": "html",
+        "language": "ar",
+        "kind": "qul",
+        "source_path": "qul/tafsir/ar-tafsir-al-wasit.json.zip",
+        "expected_paths": frozenset({"tanzil/quran-data-Tanzil.xml", "qul/tafsir/ar-tafsir-al-wasit.json.zip"}),
+        "coverage_metric": "ar_present",
+    },
+    "quran-tafsir-ar-razi": {
+        "format": "html",
+        "language": "ar",
+        "kind": "qul",
+        "source_path": "qul/tafsir/tafsir-al-razi.json.zip",
+        "expected_paths": frozenset({"tanzil/quran-data-Tanzil.xml", "qul/tafsir/tafsir-al-razi.json.zip"}),
+        "coverage_metric": "ar_present",
+    },
+    "quran-tafsir-en-ibn-kathir": {
+        "format": "html",
+        "language": "en",
+        "kind": "qul",
+        "source_path": "qul/tafsir/en-tafisr-ibn-kathir.json.zip",
+        "expected_paths": frozenset({"tanzil/quran-data-Tanzil.xml", "qul/tafsir/en-tafisr-ibn-kathir.json.zip"}),
+        "coverage_metric": "en_present",
+    },
+}
+SUPPORTED_PACK_IDS: tuple[str, ...] = tuple(SUPPORTED_TAFSIR_PACKS.keys())
+EXPECTED_PATHS = SUPPORTED_TAFSIR_PACKS[DEFAULT_PACK_ID]["expected_paths"]
 _VERSE_KEY_RE = re.compile(r"^([1-9][0-9]*):([1-9][0-9]*)$")
 
 
@@ -204,38 +262,203 @@ def build_grouped_tafsir_rows(
     return entries, map_rows
 
 
-def build_quran_tafsir(sources_root: Path, output_dir: Path) -> None:
-    """Build quran-tafsir-ar-jalalayn.db deterministically."""
+def parse_qul_tafsir_data(
+    data: Any,
+    ayah_ids: Mapping[str, int],
+    *,
+    language: str,
+) -> tuple[list[TafsirEntryRow], list[TafsirMapRow]]:
+    """Parse and validate QUL commentary JSON mapping, returning entries and map rows."""
+    _validate_ayah_ids_profile(ayah_ids)
+
+    if not isinstance(data, Mapping) or not data:
+        raise ValueError("QUL tafsir data must be a non-empty mapping")
+
+    canonical_keys = set(ayah_ids.keys())
+    data_keys = set(data.keys())
+    if data_keys != canonical_keys:
+        missing = sorted(canonical_keys - data_keys)
+        extra = sorted(data_keys - canonical_keys)
+        raise ValueError(
+            f"QUL tafsir keys mismatch canonical ayah set. Missing: {missing}, Extra: {extra}"
+        )
+
+    for k in data_keys:
+        if not _VERSE_KEY_RE.fullmatch(k):
+            raise ValueError(f"Non-canonical verse key in QUL tafsir: {k!r}")
+
+    anchors: dict[str, dict[str, Any]] = {}
+    pointers: dict[str, str] = {}
+
+    for vkey, val in data.items():
+        if isinstance(val, Mapping):
+            if "text" not in val or not isinstance(val["text"], str) or not val["text"].strip():
+                raise ValueError(f"Anchor {vkey} must have non-blank string 'text'")
+            if "ayah_keys" in val:
+                ak = val["ayah_keys"]
+                if not isinstance(ak, list) or not ak or not all(isinstance(k, str) for k in ak):
+                    raise ValueError(f"Anchor {vkey} ayah_keys must be a non-empty list of string keys")
+            anchors[vkey] = val
+        elif isinstance(val, str):
+            if val == vkey:
+                raise ValueError(f"Self-pointer rejected at {vkey}")
+            if val not in data:
+                raise ValueError(f"Pointer at {vkey} points to unknown key {val!r}")
+            pointers[vkey] = val
+        else:
+            raise ValueError(f"Invalid value type for {vkey}: {type(val).__name__}")
+
+    for vkey, target in pointers.items():
+        if target not in anchors:
+            raise ValueError(f"Pointer chain or cycle rejected: {vkey} points to non-anchor {target!r}")
+
+    anchor_members: dict[str, list[str]] = {a: [a] for a in anchors}
+    for p_key, a_key in pointers.items():
+        anchor_members[a_key].append(p_key)
+
+    sorted_anchors = sorted(anchors.keys(), key=lambda k: ayah_ids[k])
+
+    entries: list[TafsirEntryRow] = []
+    map_rows: list[TafsirMapRow] = []
+    last_end_aid = 0
+
+    for a_key in sorted_anchors:
+        vkeys = anchor_members[a_key]
+        vkeys.sort(key=lambda k: ayah_ids[k])
+
+        if vkeys[0] != a_key:
+            raise ValueError(f"Anchor {a_key} is not at the first position of group: {vkeys}")
+
+        anchor_val = anchors[a_key]
+        if "ayah_keys" in anchor_val:
+            if anchor_val["ayah_keys"] != vkeys:
+                raise ValueError(
+                    f"Declared ayah_keys mismatch for anchor {a_key}: {anchor_val['ayah_keys']} != {vkeys}"
+                )
+
+        first_aid = ayah_ids[vkeys[0]]
+        if first_aid <= last_end_aid:
+            raise ValueError(
+                f"Groups not strictly ordered or overlap detected: {first_aid} <= {last_end_aid}"
+            )
+
+        s0_str, a0_str = vkeys[0].split(":")
+        s0 = int(s0_str)
+        a0 = int(a0_str)
+
+        members: list[tuple[int, str]] = [(first_aid, vkeys[0])]
+
+        for idx in range(1, len(vkeys)):
+            vk = vkeys[idx]
+            sk_str, ak_str = vk.split(":")
+            sk = int(sk_str)
+            ak = int(ak_str)
+            if sk != s0:
+                raise ValueError(f"Cross-surah group rejected for anchor {a_key}: {vkeys}")
+            if ak != a0 + idx:
+                raise ValueError(
+                    f"Keys not strictly contiguous ascending in group for anchor {a_key}: {vkeys}"
+                )
+            aid = ayah_ids[vk]
+            if aid != first_aid + idx:
+                raise ValueError(
+                    f"Global ayah_ids not consecutive in group for anchor {a_key}: {vkeys}"
+                )
+            members.append((aid, vk))
+
+        last_end_aid = members[-1][0]
+        group_key = vkeys[0] if len(vkeys) == 1 else f"{s0}:{a0}-{a0 + len(vkeys) - 1}"
+
+        entry = _make_tafsir_entry_row(
+            group_key=group_key,
+            text=anchor_val["text"],
+            text_format="html",
+            language=language,
+            members=members,
+        )
+        entries.append(entry)
+        for aid, vk in members:
+            map_rows.append(TafsirMapRow(ayah_id=aid, verse_key=vk, entry_id=entry.id))
+
+    return entries, map_rows
+
+
+def build_qul_tafsir_rows(
+    zip_path: Path,
+    ayah_ids: Mapping[str, int],
+    *,
+    language: str,
+) -> tuple[list[TafsirEntryRow], list[TafsirMapRow]]:
+    """Ingest single-member zipped QUL tafsir JSON archive, validate and return entries and map rows."""
+    data = read_zip_strict_json(zip_path)
+    return parse_qul_tafsir_data(data, ayah_ids, language=language)
+
+
+def build_quran_tafsir(
+    sources_root: Path,
+    output_dir: Path,
+    *,
+    pack_id: str = DEFAULT_PACK_ID,
+) -> None:
+    """Build selected tafsir SQLite pack deterministically."""
     verify_runtime()
 
+    if pack_id not in SUPPORTED_TAFSIR_PACKS:
+        raise ValueError(f"Unknown or unsupported tafsir pack ID: {pack_id!r}")
+
+    cfg = SUPPORTED_TAFSIR_PACKS[pack_id]
     sources_root = Path(sources_root)
     output_dir = Path(output_dir)
 
     raw_root, metadata = load_quran_pack(
         sources_root,
-        PACK_ID,
-        EXPECTED_PATHS,
+        pack_id,
+        cfg["expected_paths"],
         fts_enabled=True,
     )
 
     meta_file = raw_root / "tanzil" / "quran-data-Tanzil.xml"
-    jalalayn_file = raw_root / "tanzil" / "ar.jalalayn.xml"
-
     coords = load_tanzil_coordinates(meta_file)
-    jalalayn_text = load_tanzil_text(
-        jalalayn_file,
-        coords,
-        locked_path="tanzil/ar.jalalayn.xml",
-    )
+
+    if cfg["kind"] == "tanzil":
+        jalalayn_file = raw_root / cfg["source_path"]
+        jalalayn_text = load_tanzil_text(
+            jalalayn_file,
+            coords,
+            locked_path=cfg["source_path"],
+        )
+        entries = [
+            _make_tafsir_entry_row(
+                group_key=vkey,
+                text=jalalayn_text[vkey],
+                text_format=cfg["format"],
+                language=cfg["language"],
+                members=[(aid, vkey)],
+            )
+            for vkey, aid in coords.ayah_ids.items()
+        ]
+        map_rows = [
+            TafsirMapRow(ayah_id=aid, verse_key=vkey, entry_id=aid)
+            for vkey, aid in coords.ayah_ids.items()
+        ]
+    elif cfg["kind"] == "qul":
+        zip_path = raw_root / cfg["source_path"]
+        entries, map_rows = build_qul_tafsir_rows(
+            zip_path,
+            coords.ayah_ids,
+            language=cfg["language"],
+        )
+    else:
+        raise ValueError(f"Unknown pack kind: {cfg['kind']!r}")
 
     coverage: dict[str, tuple[int, str | None]] = {
         "expected_total": (6236, None),
-        "ar_present": (6236, None),
+        cfg["coverage_metric"]: (6236, None),
     }
 
     repo_root = Path(__file__).resolve().parents[2]
     schema_path = repo_root / "specs" / "sql" / "quran_tafsir.v1.sql"
-    output_path = output_dir / "quran-tafsir-ar-jalalayn.db"
+    output_path = output_dir / f"{pack_id}.db"
 
     with write_quran_pack(
         output_path,
@@ -248,32 +471,26 @@ def build_quran_tafsir(sources_root: Path, output_dir: Path) -> None:
             "INSERT INTO tafsir_entries ("
             "id, group_key, start_ayah_id, end_ayah_id, text, text_format, text_search"
             ") VALUES (?, ?, ?, ?, ?, ?, ?);",
-            (
-                _make_tafsir_entry_row(
-                    group_key=vkey,
-                    text=jalalayn_text[vkey],
-                    text_format="plain",
-                    language="ar",
-                    members=[(aid, vkey)],
-                )
-                for vkey, aid in coords.ayah_ids.items()
-            ),
+            entries,
         )
         conn.executemany(
             "INSERT INTO tafsir_ayah_map ("
             "ayah_id, verse_key, entry_id"
             ") VALUES (?, ?, ?);",
-            (
-                TafsirMapRow(ayah_id=aid, verse_key=vkey, entry_id=aid)
-                for vkey, aid in coords.ayah_ids.items()
-            ),
+            map_rows,
         )
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Build quran-tafsir-ar-jalalayn SQLite pack.")
+    parser = argparse.ArgumentParser(description="Build Quran tafsir SQLite pack.")
     parser.add_argument("--sources-root", required=True, type=Path, help="Root directory containing sources/ and raw-inputs/")
-    parser.add_argument("--output-dir", required=True, type=Path, help="Output directory where quran-tafsir-ar-jalalayn.db will be written")
+    parser.add_argument("--output-dir", required=True, type=Path, help="Output directory where <pack-id>.db will be written")
+    parser.add_argument(
+        "--pack",
+        default=DEFAULT_PACK_ID,
+        choices=SUPPORTED_PACK_IDS,
+        help=f"Tafsir pack ID to build (default: {DEFAULT_PACK_ID})",
+    )
 
     try:
         args = parser.parse_args(argv)
@@ -282,12 +499,11 @@ def main(argv: list[str] | None = None) -> int:
         return code
 
     try:
-        build_quran_tafsir(args.sources_root, args.output_dir)
+        build_quran_tafsir(args.sources_root, args.output_dir, pack_id=args.pack)
         return 0
     except Exception as exc:
-        sys.stderr.write(f"Error building quran-tafsir-ar-jalalayn: {exc}\n")
+        sys.stderr.write(f"Error building {args.pack}: {exc}\n")
         return 1
-
 
 if __name__ == "__main__":
     sys.exit(main())

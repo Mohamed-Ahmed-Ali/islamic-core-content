@@ -18,6 +18,17 @@ from tests.fixtures.tanzil import (
     build_synthetic_scripture_xml,
 )
 
+
+@pytest.fixture(autouse=True)
+def _mock_verify_runtime_if_needed(monkeypatch: pytest.MonkeyPatch) -> None:
+    try:
+        from pipelines.toolchain.check_runtime import verify_runtime
+        verify_runtime()
+    except Exception:
+        monkeypatch.setattr(
+            "pipelines.builders.build_quran_tafsir.verify_runtime",
+            lambda: (Path("ffmpeg"), Path("ffprobe")),
+        )
 JALALAYN_NOTICE_DEFAULT = (
     "<!--\n"
     "# --------------------------------------------------------------------\n"
@@ -438,3 +449,420 @@ def test_build_quran_tafsir_wrong_edition_notice_failure(tmp_path: Path) -> None
     ret = main(["--sources-root", str(sources_root), "--output-dir", str(out_dir)])
     assert ret == 1
     assert not (out_dir / "quran-tafsir-ar-jalalayn.db").exists()
+
+
+# =============================================================================
+# 3. QUL Tafsir pack tests (Task 3.4A)
+# =============================================================================
+
+
+def test_builder_cli_pack_option() -> None:
+    from pipelines.builders.build_quran_tafsir import main, SUPPORTED_PACK_IDS
+
+    assert main(["--sources-root", "/tmp/nonexistent", "--output-dir", "/tmp/nonexistent", "--pack", "unknown-pack"]) == 2
+    assert main(["--pack", "invalid-pack"]) == 2
+
+    expected_packs = {
+        "quran-tafsir-ar-jalalayn",
+        "quran-tafsir-ar-ibn-kathir",
+        "quran-tafsir-ar-tabari",
+        "quran-tafsir-ar-qurtubi",
+        "quran-tafsir-ar-wasit",
+        "quran-tafsir-ar-razi",
+        "quran-tafsir-en-ibn-kathir",
+    }
+    assert set(SUPPORTED_PACK_IDS) == expected_packs
+
+
+def test_qul_pointer_grouping_success(tmp_path: Path) -> None:
+    import zipfile
+    from pipelines.builders.build_quran_tafsir import parse_qul_tafsir_data, build_qul_tafsir_rows
+
+    ayah_ids = {
+        "1:1": 1,
+        "1:2": 2,
+        "1:3": 3,
+        "2:1": 4,
+        "2:2": 5,
+        "2:3": 6,
+    }
+    data = {
+        "1:1": {"text": "<p>Tafsir 1:1</p>"},
+        "1:2": {"text": "<p>Tafsir 1:2-3</p>", "ayah_keys": ["1:2", "1:3"]},
+        "1:3": "1:2",
+        "2:1": {"text": "<p>Tafsir 2:1</p>"},
+        "2:2": {"text": "<p>Tafsir 2:2-3</p>"},
+        "2:3": "2:2",
+    }
+
+    entries, map_rows = parse_qul_tafsir_data(data, ayah_ids, language="ar")
+    assert len(entries) == 4
+    assert entries[0].id == 1
+    assert entries[0].group_key == "1:1"
+    assert entries[0].start_ayah_id == 1
+    assert entries[0].end_ayah_id == 1
+    assert entries[0].text == "<p>Tafsir 1:1</p>"
+    assert entries[0].text_format == "html"
+    assert entries[0].text_search == normalize_arabic("Tafsir 1:1")
+
+    assert entries[1].id == 2
+    assert entries[1].group_key == "1:2-3"
+    assert entries[1].start_ayah_id == 2
+    assert entries[1].end_ayah_id == 3
+    assert entries[1].text == "<p>Tafsir 1:2-3</p>"
+    assert entries[1].text_format == "html"
+
+    assert entries[2].id == 4
+    assert entries[2].group_key == "2:1"
+    assert entries[2].start_ayah_id == 4
+    assert entries[2].end_ayah_id == 4
+
+    assert entries[3].id == 5
+    assert entries[3].group_key == "2:2-3"
+    assert entries[3].start_ayah_id == 5
+    assert entries[3].end_ayah_id == 6
+
+    assert len(map_rows) == 6
+    assert map_rows == [
+        (1, "1:1", 1),
+        (2, "1:2", 2),
+        (3, "1:3", 2),
+        (4, "2:1", 4),
+        (5, "2:2", 5),
+        (6, "2:3", 5),
+    ]
+
+    # Test language="en" preserves search text without arabic normalization
+    en_entries, en_map_rows = parse_qul_tafsir_data(data, ayah_ids, language="en")
+    assert en_entries[0].text_search == "Tafsir 1:1"
+    assert len(en_map_rows) == 6
+
+    # Test reading from single-member zip archive
+    zip_file = tmp_path / "test-tafsir.json.zip"
+    with zipfile.ZipFile(zip_file, "w") as zf:
+        zf.writestr("test-tafsir.json", json.dumps(data).encode("utf-8"))
+    zip_entries, zip_map = build_qul_tafsir_rows(zip_file, ayah_ids, language="ar")
+    assert zip_entries == entries
+    assert zip_map == map_rows
+
+
+def test_qul_pointer_chain_and_cycle_rejection() -> None:
+    from pipelines.builders.build_quran_tafsir import parse_qul_tafsir_data
+
+    ayah_ids = {"1:1": 1, "1:2": 2, "1:3": 3}
+
+    # Pointer chain: 1:3 -> 1:2 -> 1:1
+    chain_data = {
+        "1:1": {"text": "<p>T1</p>"},
+        "1:2": "1:1",
+        "1:3": "1:2",
+    }
+    with pytest.raises(ValueError, match="(?i)pointer"):
+        parse_qul_tafsir_data(chain_data, ayah_ids, language="ar")
+
+    # Cycle: 1:1 -> 1:2 -> 1:1
+    cycle_data = {
+        "1:1": "1:2",
+        "1:2": "1:1",
+        "1:3": {"text": "<p>T3</p>"},
+    }
+    with pytest.raises(ValueError, match="(?i)pointer"):
+        parse_qul_tafsir_data(cycle_data, ayah_ids, language="ar")
+
+    # Self-pointer: 1:1 -> 1:1
+    self_data = {
+        "1:1": "1:1",
+        "1:2": {"text": "<p>T2</p>"},
+        "1:3": {"text": "<p>T3</p>"},
+    }
+    with pytest.raises(ValueError, match="(?i)pointer|self"):
+        parse_qul_tafsir_data(self_data, ayah_ids, language="ar")
+
+    # Pointer to unknown key
+    unknown_ptr_data = {
+        "1:1": {"text": "<p>T1</p>"},
+        "1:2": "9:99",
+        "1:3": {"text": "<p>T3</p>"},
+    }
+    with pytest.raises(ValueError, match="(?i)pointer|unknown"):
+        parse_qul_tafsir_data(unknown_ptr_data, ayah_ids, language="ar")
+
+
+def test_qul_noncontiguous_grouping_rejection() -> None:
+    from pipelines.builders.build_quran_tafsir import parse_qul_tafsir_data
+
+    # Gap in same surah: 1:1 anchor, 1:2 anchor, 1:3 points to 1:1
+    ayah_ids = {"1:1": 1, "1:2": 2, "1:3": 3}
+    gap_data = {
+        "1:1": {"text": "<p>T1</p>"},
+        "1:2": {"text": "<p>T2</p>"},
+        "1:3": "1:1",
+    }
+    with pytest.raises(ValueError, match="contiguous|consecutive|gap"):
+        parse_qul_tafsir_data(gap_data, ayah_ids, language="ar")
+
+    # Cross-surah grouping: 2:1 points to 1:1
+    cross_ayah_ids = {"1:1": 1, "2:1": 2}
+    cross_data = {
+        "1:1": {"text": "<p>T1</p>"},
+        "2:1": "1:1",
+    }
+    with pytest.raises(ValueError, match="cross-surah|surah"):
+        parse_qul_tafsir_data(cross_data, cross_ayah_ids, language="ar")
+
+    # Pointer before anchor: 1:1 points to 1:2
+    rev_ayah_ids = {"1:1": 1, "1:2": 2}
+    rev_data = {
+        "1:1": "1:2",
+        "1:2": {"text": "<p>T2</p>"},
+    }
+    with pytest.raises(ValueError, match="first|anchor|contiguous"):
+        parse_qul_tafsir_data(rev_data, rev_ayah_ids, language="ar")
+
+
+def test_qul_shifted_pointer_rejected() -> None:
+    from pipelines.builders.build_quran_tafsir import parse_qul_tafsir_data
+
+    ayah_ids = {"1:1": 1, "1:2": 2, "1:3": 3}
+    # 1:1 is anchor, 1:2 is independent, 1:3 points back to 1:1 (shifted pointer)
+    shifted_data = {
+        "1:1": {"text": "<p>T1</p>"},
+        "1:2": {"text": "<p>T2</p>"},
+        "1:3": "1:1",
+    }
+    with pytest.raises(ValueError, match="contiguous|consecutive|gap"):
+        parse_qul_tafsir_data(shifted_data, ayah_ids, language="ar")
+
+
+def test_qul_missing_extra_and_malformed_keys_rejection() -> None:
+    from pipelines.builders.build_quran_tafsir import parse_qul_tafsir_data
+
+    ayah_ids = {"1:1": 1, "1:2": 2}
+
+    # Missing key from ayah_ids
+    with pytest.raises(ValueError, match="missing|canonical"):
+        parse_qul_tafsir_data({"1:1": {"text": "<p>T1</p>"}}, ayah_ids, language="ar")
+
+    # Extra key not in ayah_ids
+    extra_data = {
+        "1:1": {"text": "<p>T1</p>"},
+        "1:2": {"text": "<p>T2</p>"},
+        "1:3": {"text": "<p>T3</p>"},
+    }
+    with pytest.raises(ValueError, match="extra|canonical"):
+        parse_qul_tafsir_data(extra_data, ayah_ids, language="ar")
+
+    # Blank anchor text
+    blank_data = {
+        "1:1": {"text": "   "},
+        "1:2": {"text": "<p>T2</p>"},
+    }
+    with pytest.raises(ValueError, match="empty|blank"):
+        parse_qul_tafsir_data(blank_data, ayah_ids, language="ar")
+
+    # Invalid value type
+    invalid_val_data = {
+        "1:1": 12345,
+        "1:2": {"text": "<p>T2</p>"},
+    }
+    with pytest.raises(ValueError, match="type"):
+        parse_qul_tafsir_data(invalid_val_data, ayah_ids, language="ar")
+
+
+def _setup_qul_tafsir_pack_env(
+    root: Path,
+    *,
+    pack_id: str = "quran-tafsir-ar-ibn-kathir",
+    language: str = "ar",
+) -> tuple[Path, Path]:
+    import zipfile
+    from tests.fixtures.tanzil import build_synthetic_metadata_xml
+
+    raw_dir = root / "raw-inputs"
+    sources_dir = root / "sources"
+    out_dir = root / "dist"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    tanzil_dir = raw_dir / "tanzil"
+    tanzil_dir.mkdir(parents=True, exist_ok=True)
+    meta_path = tanzil_dir / "quran-data-Tanzil.xml"
+    meta_path.write_bytes(build_synthetic_metadata_xml().encode("utf-8"))
+
+    # Generate synthetic QUL JSON for 6236 ayahs
+    from pipelines.common.tanzil_coordinates import load_tanzil_coordinates
+    coords = load_tanzil_coordinates(meta_path)
+
+    # Create QUL tafsir data with some singletons and some 2-ayah groups
+    qul_data: dict[str, Any] = {}
+    vkeys = list(coords.ayah_ids.keys())
+    idx = 0
+    while idx < len(vkeys):
+        vk = vkeys[idx]
+        s_num, a_num = map(int, vk.split(":"))
+        # Group with next verse if same surah and even index
+        if idx + 1 < len(vkeys):
+            next_vk = vkeys[idx + 1]
+            next_s, next_a = map(int, next_vk.split(":"))
+            if next_s == s_num and next_a == a_num + 1 and idx % 4 == 0:
+                qul_data[vk] = {
+                    "text": f"<p>Tafsir for {vk}-{next_vk}</p>",
+                    "ayah_keys": [vk, next_vk],
+                }
+                qul_data[next_vk] = vk
+                idx += 2
+                continue
+        qul_data[vk] = {"text": f"<p>Tafsir for {vk}</p>"}
+        idx += 1
+
+    from pipelines.builders.build_quran_tafsir import SUPPORTED_TAFSIR_PACKS
+    source_rel = SUPPORTED_TAFSIR_PACKS[pack_id]["source_path"]
+    zip_dest = raw_dir / source_rel
+    zip_dest.parent.mkdir(parents=True, exist_ok=True)
+
+    member_name = Path(source_rel).name.removesuffix(".zip")
+    with zipfile.ZipFile(zip_dest, "w") as zf:
+        zf.writestr(member_name, json.dumps(qul_data, indent=2).encode("utf-8"))
+
+    registry_data = {
+        source_rel: {
+            "packIds": [pack_id],
+            "sourceUrl": f"https://example.org/{source_rel}",
+            "sourceVersion": "1.0",
+        },
+        "tanzil/quran-data-Tanzil.xml": {
+            "packIds": [pack_id],
+            "sourceUrl": "https://example.org/quran-data-Tanzil.xml",
+            "sourceVersion": "1.0",
+        },
+    }
+    reg_file = sources_dir / "registry.json"
+    reg_file.parent.mkdir(parents=True, exist_ok=True)
+    reg_file.write_text(json.dumps(registry_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    author_lock(reg_file, root / "raw-inputs", sources_dir / "manifest.lock.json")
+
+    lic_data = {
+        "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+        "packId": pack_id,
+        "primaryPath": source_rel,
+        "reviewedBy": None,
+        "status": "pending",
+        "sources": [
+            {
+                "attribution": "Synthetic Tafsir",
+                "name": "Synthetic Tafsir",
+                "notice": "synthetic notice",
+                "path": source_rel,
+                "permittedUses": [],
+                "rightsEvidence": ["https://example.org/rights"],
+                "sourceUrl": f"https://example.org/{source_rel}",
+                "sourceVersion": "1.0",
+            },
+            {
+                "attribution": "Synthetic Quran Metadata",
+                "name": "Synthetic Metadata",
+                "notice": "synthetic notice",
+                "path": "tanzil/quran-data-Tanzil.xml",
+                "permittedUses": [],
+                "rightsEvidence": ["https://example.org/rights"],
+                "sourceUrl": "https://example.org/quran-data-Tanzil.xml",
+                "sourceVersion": "1.0",
+            },
+        ],
+    }
+    lic_file = sources_dir / "licenses" / f"{pack_id}.json"
+    lic_file.parent.mkdir(parents=True, exist_ok=True)
+    lic_file.write_text(json.dumps(lic_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    return root, out_dir
+
+
+def test_build_quran_tafsir_qul_success(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_tafsir import main
+
+    pack_id = "quran-tafsir-ar-ibn-kathir"
+    sources_root, out_dir = _setup_qul_tafsir_pack_env(tmp_path, pack_id=pack_id)
+    db_path = out_dir / f"{pack_id}.db"
+
+    ret = main([
+        "--sources-root", str(sources_root),
+        "--output-dir", str(out_dir),
+        "--pack", pack_id,
+    ])
+    assert ret == 0
+    assert db_path.is_file()
+
+    conn = _open_ro_db(db_path)
+    try:
+        integrity = conn.execute("PRAGMA integrity_check;").fetchall()
+        assert integrity == [("ok",)]
+        fk_check = conn.execute("PRAGMA foreign_key_check;").fetchall()
+        assert fk_check == []
+
+        # Verify entries format and text
+        entries = conn.execute(
+            "SELECT id, group_key, text_format, text FROM tafsir_entries ORDER BY id ASC;"
+        ).fetchall()
+        assert len(entries) > 0
+        for eid, gkey, fmt, txt in entries:
+            assert fmt == "html"
+            assert txt.startswith("<p>Tafsir for ")
+
+        # Verify map covers exactly 6236 ayahs
+        map_rows = conn.execute(
+            "SELECT ayah_id, verse_key, entry_id FROM tafsir_ayah_map ORDER BY ayah_id ASC;"
+        ).fetchall()
+        assert len(map_rows) == 6236
+        assert [r[0] for r in map_rows] == list(range(1, 6237))
+
+        # Verify pack metadata
+        meta = dict(conn.execute("SELECT key, value FROM pack_meta;").fetchall())
+        assert meta["pack_id"] == pack_id
+        assert meta["completeness"] == "complete"
+
+        # Coverage report
+        cov = dict(conn.execute("SELECT metric, count FROM coverage_report;").fetchall())
+        assert cov["expected_total"] == 6236
+        assert cov["ar_present"] == 6236
+    finally:
+        conn.close()
+
+
+def test_build_quran_tafsir_qul_en_ibn_kathir_success(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_tafsir import main
+
+    pack_id = "quran-tafsir-en-ibn-kathir"
+    sources_root, out_dir = _setup_qul_tafsir_pack_env(tmp_path, pack_id=pack_id, language="en")
+    db_path = out_dir / f"{pack_id}.db"
+
+    ret = main([
+        "--sources-root", str(sources_root),
+        "--output-dir", str(out_dir),
+        "--pack", pack_id,
+    ])
+    assert ret == 0
+    assert db_path.is_file()
+
+    conn = _open_ro_db(db_path)
+    try:
+        integrity = conn.execute("PRAGMA integrity_check;").fetchall()
+        assert integrity == [("ok",)]
+        fk_check = conn.execute("PRAGMA foreign_key_check;").fetchall()
+        assert fk_check == []
+
+        # Verify entries format and text
+        entries = conn.execute(
+            "SELECT id, group_key, text_format, text FROM tafsir_entries ORDER BY id ASC;"
+        ).fetchall()
+        assert len(entries) > 0
+        for eid, gkey, fmt, txt in entries:
+            assert fmt == "html"
+            assert txt.startswith("<p>Tafsir for ")
+
+        # Coverage report for English pack has en_present
+        cov = dict(conn.execute("SELECT metric, count FROM coverage_report;").fetchall())
+        assert cov["expected_total"] == 6236
+        assert cov["en_present"] == 6236
+        assert "ar_present" not in cov
+    finally:
+        conn.close()
