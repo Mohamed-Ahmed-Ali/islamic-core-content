@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "quran-tafsir-ar-qurtubi",
+  "primaryPath": "qul/tafsir/ar-tafseer-al-qurtubi.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/tafsir/23). Specific tahqiq/credit not shown by QUL.",
+      "name": "Tafsir al-Qurtubi (Arabic)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/tafsir/ar-tafseer-al-qurtubi.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/tafsir/23",
+        "https://qul.tarteel.ai/resources/tafsir/23/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/tafsir/23",
+      "sourceVersion": "sha256:b00e704da7e4497dd8dceed431c3d915875ab04535b5667d6b225e71a334cbec"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

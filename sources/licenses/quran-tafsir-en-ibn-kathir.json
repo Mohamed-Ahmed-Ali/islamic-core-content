@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "quran-tafsir-en-ibn-kathir",
+  "primaryPath": "qul/tafsir/en-tafisr-ibn-kathir.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/tafsir/35). Specific translation/credit not shown by QUL.",
+      "name": "Tafsir Ibn Kathir (English Abridged)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/tafsir/en-tafisr-ibn-kathir.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/tafsir/35",
+        "https://qul.tarteel.ai/resources/tafsir/35/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/tafsir/35",
+      "sourceVersion": "sha256:562788b8ed1cc14d00802fdc0e5aa6edf1e6f90da2b33839b75d654a12fe6297"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

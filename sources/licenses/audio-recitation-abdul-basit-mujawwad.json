@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "audio-recitation-abdul-basit-mujawwad",
+  "primaryPath": "qul/recitation/ayah-recitation-abdul-basit-abdul-samad-mujawwad-hafs-949.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/recitation/114). Specific recording copyright/credit not shown by QUL.",
+      "name": "Ayah Recitation — Abdul Basit Abdul Samad (Mujawwad Hafs, Recitation 949)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/recitation/ayah-recitation-abdul-basit-abdul-samad-mujawwad-hafs-949.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/recitation/114",
+        "https://qul.tarteel.ai/resources/recitation/114/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/recitation/114",
+      "sourceVersion": "sha256:507ef437dec22573367be735b4f0040e7c575cb0fb9d8347c6806727dee0124e"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

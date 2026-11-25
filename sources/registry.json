@@ -111,6 +111,155 @@
     "sourceUrl": "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/tirmidhi.json",
     "sourceVersion": "70b83d6d21995bb32f8d7271cd75501be5a922a7"
   },
+  "qul/mushaf/qpc-hafs-tajweed.json.zip": {
+    "packIds": [
+      "quran-mushaf-indopak-15",
+      "quran-mushaf-madani-v2",
+      "quran-wbw-en"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/quran-script/87",
+    "sourceVersion": "sha256:bc7b66f154e269f4a7de29af4033975ee0f3778f0891841534fb4907c7ff6fc9"
+  },
+  "qul/mushaf/qpc-v2-15-lines.db.zip": {
+    "packIds": [
+      "quran-mushaf-madani-v2"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/mushaf-layout/10",
+    "sourceVersion": "sha256:697cbc7f16db1f56b6d95c4d11a9eea074ad4759babd2d75abcad5738e2fdf96"
+  },
+  "qul/mushaf/qudratullah-indopak-15-lines.db.zip": {
+    "packIds": [
+      "quran-mushaf-indopak-15"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/mushaf-layout/12",
+    "sourceVersion": "sha256:071a5edc93ee58a267f0816d58e75931e85d85cb12a9241110800d44aa3c6f7c"
+  },
+  "qul/recitation/ayah-recitation-abdul-basit-abdul-samad-mujawwad-hafs-949.json.zip": {
+    "packIds": [
+      "audio-recitation-abdul-basit-mujawwad"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/recitation/114",
+    "sourceVersion": "sha256:507ef437dec22573367be735b4f0040e7c575cb0fb9d8347c6806727dee0124e"
+  },
+  "qul/recitation/ayah-recitation-abdul-basit-abdul-samad-murattal-hafs-950.json.zip": {
+    "packIds": [
+      "audio-recitation-abdul-basit-murattal"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/recitation/115",
+    "sourceVersion": "sha256:5634803050ffb2bf8e6b0904843518d202885593b08777f8aeae637a65a60781"
+  },
+  "qul/recitation/ayah-recitation-mahmoud-khalil-al-husary-mujawwad-hafs-956.json.zip": {
+    "packIds": [
+      "audio-recitation-al-husary-mujawwad"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/recitation/111",
+    "sourceVersion": "sha256:7964360798ead7fbaca90156c29fbff37f7d9358c3c6b7f3e5172c8297edeed0"
+  },
+  "qul/recitation/ayah-recitation-mahmoud-khalil-al-husary-murattal-hafs-955.json.zip": {
+    "packIds": [
+      "audio-recitation-al-husary-muallim"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/recitation/112",
+    "sourceVersion": "sha256:d87cbc48bb11098c8fb7a05c25492e07bea0546add1a6d38b065052eae1f711f"
+  },
+  "qul/recitation/ayah-recitation-mahmoud-khalil-al-husary-murattal-hafs-957-Muallim.json.zip": {
+    "packIds": [
+      "audio-recitation-al-husary-murattal"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/recitation/110",
+    "sourceVersion": "sha256:b0c8726f575c0d80e386ee69e804cc6fd99f3e7189bbe43291cdf465bda13886"
+  },
+  "qul/recitation/ayah-recitation-mohamed-al-tablawi-recitation-murattal-hafs-73.json.zip": {
+    "packIds": [
+      "audio-recitation-al-tablawi-murattal"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/recitation/106",
+    "sourceVersion": "sha256:53883ed51088bf2a690b39f4841f69c76689cff49e19b775974304378f1133e5"
+  },
+  "qul/recitation/ayah-recitation-muhammad-siddiq-al-minshawi-murattal-hafs-959.json.zip": {
+    "packIds": [
+      "audio-recitation-al-minshawi-murattal"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/recitation/108",
+    "sourceVersion": "sha256:01372845f8e4a0bb595978495c2ceef1b04f5dea7b84a64b60216e9f46cc90f2"
+  },
+  "qul/tafsir/ar-tafseer-al-qurtubi.json.zip": {
+    "packIds": [
+      "quran-tafsir-ar-qurtubi"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/tafsir/23",
+    "sourceVersion": "sha256:b00e704da7e4497dd8dceed431c3d915875ab04535b5667d6b225e71a334cbec"
+  },
+  "qul/tafsir/ar-tafsir-al-tabari.json.zip": {
+    "packIds": [
+      "quran-tafsir-ar-tabari"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/tafsir/37",
+    "sourceVersion": "sha256:1169bca4ab50c8e132b9bada580918dcb4bf69c0dfce86a62f667607422fb93d"
+  },
+  "qul/tafsir/ar-tafsir-al-wasit.json.zip": {
+    "packIds": [
+      "quran-tafsir-ar-wasit"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/tafsir/26",
+    "sourceVersion": "sha256:5b316d217132ff355d07e4d2e2e16e598dd689d4b6d750b252c3c073e3faf07a"
+  },
+  "qul/tafsir/ar-tafsir-ibn-kathir.json.zip": {
+    "packIds": [
+      "quran-tafsir-ar-ibn-kathir"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/tafsir/22",
+    "sourceVersion": "sha256:8b5057f339be6a68720c4ff8f5231f34a7df50ea75120ece0fcb5b3118a7e3e6"
+  },
+  "qul/tafsir/en-tafisr-ibn-kathir.json.zip": {
+    "packIds": [
+      "quran-tafsir-en-ibn-kathir"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/tafsir/35",
+    "sourceVersion": "sha256:562788b8ed1cc14d00802fdc0e5aa6edf1e6f90da2b33839b75d654a12fe6297"
+  },
+  "qul/tafsir/tafsir-al-razi.json.zip": {
+    "packIds": [
+      "quran-tafsir-ar-razi"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/tafsir/488",
+    "sourceVersion": "sha256:edb1da54845c98b8b2a9278522f1e7377095d86d77ab801ce8edb6114d98b5a8"
+  },
+  "qul/translation/en-sahih-international-with-footnote-tags.json.zip": {
+    "packIds": [
+      "quran-tr-en-sahih"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/translation/193",
+    "sourceVersion": "sha256:c564d8ff2308d2779fc69836102cff307659150f8773bcd09822e867fed22ebd"
+  },
+  "qul/wbw/english-wbw-translation.db.zip": {
+    "packIds": [
+      "quran-wbw-en"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/translation/92",
+    "sourceVersion": "sha256:5dea0d7a5b0648180e9f6277bad406153b234bedb0f498b4fb76424686c72bc1"
+  },
+  "qul/wbw/english-wbw-translation.json.zip": {
+    "packIds": [
+      "quran-wbw-en"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/translation/92",
+    "sourceVersion": "sha256:a2af2d165fbb8377979282fc7e54ceab4d820c77a3b2d36554c0e1a6e26a6558"
+  },
+  "qul/wbw/english-wbw-transliteration.db.zip": {
+    "packIds": [
+      "quran-wbw-en"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/transliteration/71",
+    "sourceVersion": "sha256:967d2a83e4257da27ed728256320eca65dc62860db5539bd8debf508b033b309"
+  },
+  "qul/wbw/english-wbw-transliteration.json.zip": {
+    "packIds": [
+      "quran-wbw-en"
+    ],
+    "sourceUrl": "https://qul.tarteel.ai/resources/transliteration/71",
+    "sourceVersion": "sha256:7506842c4fcb09ec3ec4392522cb8280e34f8d12138fa6c3f106efb3b737b7bd"
+  },
   "tanzil/ar.jalalayn.xml": {
     "packIds": [
       "quran-tafsir-ar-jalalayn"
@@ -127,11 +276,28 @@
   },
   "tanzil/quran-data-Tanzil.xml": {
     "packIds": [
+      "audio-recitation-abdul-basit-mujawwad",
+      "audio-recitation-abdul-basit-murattal",
+      "audio-recitation-al-husary-muallim",
+      "audio-recitation-al-husary-mujawwad",
+      "audio-recitation-al-husary-murattal",
+      "audio-recitation-al-minshawi-murattal",
+      "audio-recitation-al-tablawi-murattal",
       "quran-core",
       "quran-morphology",
+      "quran-mushaf-indopak-15",
+      "quran-mushaf-madani-v2",
       "quran-scripts-extended",
+      "quran-tafsir-ar-ibn-kathir",
       "quran-tafsir-ar-jalalayn",
-      "quran-tr-en-pickthall"
+      "quran-tafsir-ar-qurtubi",
+      "quran-tafsir-ar-razi",
+      "quran-tafsir-ar-tabari",
+      "quran-tafsir-ar-wasit",
+      "quran-tafsir-en-ibn-kathir",
+      "quran-tr-en-pickthall",
+      "quran-tr-en-sahih",
+      "quran-wbw-en"
     ],
     "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
     "sourceVersion": "1.0"

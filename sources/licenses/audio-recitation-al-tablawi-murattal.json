@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "audio-recitation-al-tablawi-murattal",
+  "primaryPath": "qul/recitation/ayah-recitation-mohamed-al-tablawi-recitation-murattal-hafs-73.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/recitation/106). Specific recording copyright/credit not shown by QUL.",
+      "name": "Ayah Recitation — Mohamed Al-Tablawi (Murattal Hafs, Recitation 73)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/recitation/ayah-recitation-mohamed-al-tablawi-recitation-murattal-hafs-73.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/recitation/106",
+        "https://qul.tarteel.ai/resources/recitation/106/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/recitation/106",
+      "sourceVersion": "sha256:53883ed51088bf2a690b39f4841f69c76689cff49e19b775974304378f1133e5"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

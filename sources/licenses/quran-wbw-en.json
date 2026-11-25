@@ -1,0 +1,87 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "quran-wbw-en",
+  "primaryPath": "qul/wbw/english-wbw-translation.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/quran-script/87). King Fahd Glorious Quran Printing Complex (QPC) Hafs Tajweed text. Specific contributor credit not shown by QUL.",
+      "name": "QPC Hafs Tajweed",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/mushaf/qpc-hafs-tajweed.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/quran-script/87",
+        "https://qul.tarteel.ai/resources/quran-script/87/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/quran-script/87",
+      "sourceVersion": "sha256:bc7b66f154e269f4a7de29af4033975ee0f3778f0891841534fb4907c7ff6fc9"
+    },
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/translation/92). Specific translator credit not shown by QUL.",
+      "name": "English Word by Word Translation (SQLite)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/wbw/english-wbw-translation.db.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/translation/92",
+        "https://qul.tarteel.ai/resources/translation/92/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/translation/92",
+      "sourceVersion": "sha256:5dea0d7a5b0648180e9f6277bad406153b234bedb0f498b4fb76424686c72bc1"
+    },
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/translation/92). Specific translator credit not shown by QUL.",
+      "name": "English Word by Word Translation (JSON)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/wbw/english-wbw-translation.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/translation/92",
+        "https://qul.tarteel.ai/resources/translation/92/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/translation/92",
+      "sourceVersion": "sha256:a2af2d165fbb8377979282fc7e54ceab4d820c77a3b2d36554c0e1a6e26a6558"
+    },
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/transliteration/71). Specific transliteration methodology credit not shown by QUL.",
+      "name": "English Word by Word Transliteration (SQLite)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/wbw/english-wbw-transliteration.db.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/transliteration/71",
+        "https://qul.tarteel.ai/resources/transliteration/71/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/transliteration/71",
+      "sourceVersion": "sha256:967d2a83e4257da27ed728256320eca65dc62860db5539bd8debf508b033b309"
+    },
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/transliteration/71). Specific transliteration methodology credit not shown by QUL.",
+      "name": "English Word by Word Transliteration (JSON)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/wbw/english-wbw-transliteration.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/transliteration/71",
+        "https://qul.tarteel.ai/resources/transliteration/71/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/transliteration/71",
+      "sourceVersion": "sha256:7506842c4fcb09ec3ec4392522cb8280e34f8d12138fa6c3f106efb3b737b7bd"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

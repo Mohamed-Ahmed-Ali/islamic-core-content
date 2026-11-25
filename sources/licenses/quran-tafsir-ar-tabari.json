@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "quran-tafsir-ar-tabari",
+  "primaryPath": "qul/tafsir/ar-tafsir-al-tabari.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/tafsir/37). Specific tahqiq/credit not shown by QUL.",
+      "name": "Tafsir al-Tabari — Jami al-Bayan (Arabic)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/tafsir/ar-tafsir-al-tabari.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/tafsir/37",
+        "https://qul.tarteel.ai/resources/tafsir/37/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/tafsir/37",
+      "sourceVersion": "sha256:1169bca4ab50c8e132b9bada580918dcb4bf69c0dfce86a62f667607422fb93d"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

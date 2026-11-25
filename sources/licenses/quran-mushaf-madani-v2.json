@@ -1,0 +1,48 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "quran-mushaf-madani-v2",
+  "primaryPath": "qul/mushaf/qpc-v2-15-lines.db.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/quran-script/87). King Fahd Glorious Quran Printing Complex (QPC) Hafs Tajweed text. Specific contributor credit not shown by QUL.",
+      "name": "QPC Hafs Tajweed",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/mushaf/qpc-hafs-tajweed.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/quran-script/87",
+        "https://qul.tarteel.ai/resources/quran-script/87/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/quran-script/87",
+      "sourceVersion": "sha256:bc7b66f154e269f4a7de29af4033975ee0f3778f0891841534fb4907c7ff6fc9"
+    },
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/mushaf-layout/10). Specific layout creator/credit not shown by QUL.",
+      "name": "QPC V2 15 Lines Layout",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/mushaf/qpc-v2-15-lines.db.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/mushaf-layout/10",
+        "https://qul.tarteel.ai/resources/mushaf-layout/10/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/mushaf-layout/10",
+      "sourceVersion": "sha256:697cbc7f16db1f56b6d95c4d11a9eea074ad4759babd2d75abcad5738e2fdf96"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

@@ -49,7 +49,14 @@ def _copy_v010_source_tree(repo_root: Path, sources_dir: Path) -> None:
     shutil_copy = __import__("shutil").copytree
     shutil_copy(repo_root / "sources" / "licenses", sources_dir / "licenses")
     reg_data = json.loads((repo_root / "sources" / "registry.json").read_text(encoding="utf-8"))
-    v010_reg = {k: v for k, v in reg_data.items() if k in _V010_PATH_PACK_MAP}
+    v010_all_packs = {p for packs in _V010_PATH_PACK_MAP.values() for p in packs}
+    v010_reg = {}
+    for k, v in reg_data.items():
+        if k in _V010_PATH_PACK_MAP:
+            entry = dict(v)
+            if "packIds" in entry:
+                entry["packIds"] = [p for p in entry["packIds"] if p in v010_all_packs]
+            v010_reg[k] = entry
     (sources_dir / "registry.json").write_text(json.dumps(v010_reg), encoding="utf-8")
     lock_data = json.loads((repo_root / "sources" / "manifest.lock.json").read_text(encoding="utf-8"))
     v010_inputs = [i for i in lock_data["inputs"] if i["path"] in _V010_PATH_PACK_MAP]

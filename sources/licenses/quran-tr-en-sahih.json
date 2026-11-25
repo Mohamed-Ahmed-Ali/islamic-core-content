@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "quran-tr-en-sahih",
+  "primaryPath": "qul/translation/en-sahih-international-with-footnote-tags.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/translation/193). Saheeh International translation. Specific publisher/edition credit not shown by QUL.",
+      "name": "Saheeh International Translation with Footnote Tags",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/translation/en-sahih-international-with-footnote-tags.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/translation/193",
+        "https://qul.tarteel.ai/resources/translation/193/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/translation/193",
+      "sourceVersion": "sha256:c564d8ff2308d2779fc69836102cff307659150f8773bcd09822e867fed22ebd"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

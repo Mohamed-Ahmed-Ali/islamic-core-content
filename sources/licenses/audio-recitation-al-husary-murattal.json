@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "audio-recitation-al-husary-murattal",
+  "primaryPath": "qul/recitation/ayah-recitation-mahmoud-khalil-al-husary-murattal-hafs-957-Muallim.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/recitation/110). Specific recording copyright/credit not shown by QUL.",
+      "name": "Ayah Recitation — Mahmoud Khalil Al-Husary (Murattal Hafs, Recitation 957)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/recitation/ayah-recitation-mahmoud-khalil-al-husary-murattal-hafs-957-Muallim.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/recitation/110",
+        "https://qul.tarteel.ai/resources/recitation/110/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/recitation/110",
+      "sourceVersion": "sha256:b0c8726f575c0d80e386ee69e804cc6fd99f3e7189bbe43291cdf465bda13886"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

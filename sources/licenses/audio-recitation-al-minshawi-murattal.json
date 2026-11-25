@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "audio-recitation-al-minshawi-murattal",
+  "primaryPath": "qul/recitation/ayah-recitation-muhammad-siddiq-al-minshawi-murattal-hafs-959.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/recitation/108). Specific recording copyright/credit not shown by QUL.",
+      "name": "Ayah Recitation — Muhammad Siddiq Al-Minshawi (Murattal Hafs, Recitation 959)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/recitation/ayah-recitation-muhammad-siddiq-al-minshawi-murattal-hafs-959.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/recitation/108",
+        "https://qul.tarteel.ai/resources/recitation/108/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/recitation/108",
+      "sourceVersion": "sha256:01372845f8e4a0bb595978495c2ceef1b04f5dea7b84a64b60216e9f46cc90f2"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

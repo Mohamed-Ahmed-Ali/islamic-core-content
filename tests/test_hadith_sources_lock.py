@@ -48,10 +48,9 @@ PHASE_1_PATHS = [
 ]
 
 
-def test_manifest_lock_has_25_entries() -> None:
+def test_manifest_lock_preserves_prior_inventories() -> None:
     lock_path = REPO_ROOT / "sources" / "manifest.lock.json"
     entries = parse_and_validate_lock(lock_path)
-    assert len(entries) == 25, f"Expected exactly 25 lock entries, got {len(entries)}"
 
     entry_paths = [e.path for e in entries]
     assert entry_paths == sorted(entry_paths), "Lock entries must be sorted lexically by path"
@@ -59,9 +58,9 @@ def test_manifest_lock_has_25_entries() -> None:
     for p in PHASE_1_PATHS:
         assert p in entry_paths, f"Missing Phase 1 path {p} in lock entries"
 
-    for slug in HADITH_SLUGS:
-        hadith_path = f"hadith/{slug}.json"
-        assert hadith_path in entry_paths, f"Missing hadith path {hadith_path} in lock entries"
+    hadith_paths = [p for p in entry_paths if p.startswith("hadith/")]
+    expected_hadith = sorted(f"hadith/{slug}.json" for slug in HADITH_SLUGS)
+    assert hadith_paths == expected_hadith, f"Hadith paths mismatch: {hadith_paths} != {expected_hadith}"
 
 
 def test_malik_lock_entry() -> None:
@@ -75,13 +74,12 @@ def test_malik_lock_entry() -> None:
     assert malik_entry.source_url == "https://raw.githubusercontent.com/AhmedBaset/hadith-json/70b83d6d21995bb32f8d7271cd75501be5a922a7/db/by_book/the_9_books/malik.json"
 
 
-def test_registry_has_25_entries_matching_lock() -> None:
+def test_registry_and_lock_correspondence() -> None:
     reg_path = REPO_ROOT / "sources" / "registry.json"
     lock_path = REPO_ROOT / "sources" / "manifest.lock.json"
     registry_data = parse_and_validate_registry(reg_path)
     lock_entries = parse_and_validate_lock(lock_path)
 
-    assert len(registry_data) == 25, f"Expected exactly 25 registry entries, got {len(registry_data)}"
     assert sorted(registry_data.keys()) == [e.path for e in lock_entries]
 
     for slug in HADITH_SLUGS:

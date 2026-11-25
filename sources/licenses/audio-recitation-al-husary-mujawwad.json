@@ -1,0 +1,35 @@
+{
+  "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+  "packId": "audio-recitation-al-husary-mujawwad",
+  "primaryPath": "qul/recitation/ayah-recitation-mahmoud-khalil-al-husary-mujawwad-hafs-956.json.zip",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Tarteel AI QUL (https://qul.tarteel.ai/resources/recitation/111). Specific recording copyright/credit not shown by QUL.",
+      "name": "Ayah Recitation — Mahmoud Khalil Al-Husary (Mujawwad Hafs, Recitation 956)",
+      "notice": "\"We don’t have copyright information for this resource.\" Underlying rights, specific attributions, and redistribution terms remain pending review.",
+      "path": "qul/recitation/ayah-recitation-mahmoud-khalil-al-husary-mujawwad-hafs-956.json.zip",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://qul.tarteel.ai/resources/recitation/111",
+        "https://qul.tarteel.ai/resources/recitation/111/licence"
+      ],
+      "sourceUrl": "https://qul.tarteel.ai/resources/recitation/111",
+      "sourceVersion": "sha256:7964360798ead7fbaca90156c29fbff37f7d9358c3c6b7f3e5172c8297edeed0"
+    },
+    {
+      "attribution": "Tanzil Project (https://tanzil.net/)",
+      "name": "Tanzil Quran Metadata",
+      "notice": "<quran type=\"metadata\" version=\"1.0\" copyright=\"(C) 2008-2009 Tanzil.info\" license=\"cc-by\">",
+      "path": "tanzil/quran-data-Tanzil.xml",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://tanzil.net/docs/quran_metadata",
+        "sources/licenses/evidence/tanzil/quran-data-Tanzil.xml.notice.txt"
+      ],
+      "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+      "sourceVersion": "1.0"
+    }
+  ],
+  "status": "pending"
+}

@@ -19,13 +19,15 @@
 ### In Progress (Milestones 2 & 3 — `v0.2.0` / `v0.3.0`)
 * **Hadith Books (Arabic + English):** Currently being collected into standardized per-book **JSON** files (replacing the older agent DB that dropped English fields).
 * **Extended Tafsirs (Arabic + English):** Collecting in unified **JSON** format (from QUL or verified upstream sources).
-* **QUL Downloads (JSON):** Word-by-Word (`wbw-en` + others), Tajweed scripts, Mushaf page layouts, and recitation segment timestamps.
+* **Local QUL archives:** English word meanings and transliteration, six commentary editions, Saheeh International with footnotes, two Mushaf layouts with Tajweed, and seven recitation timing editions.
 
 ---
 
 ## 2. Raw Input Staging Guide (For Your Ongoing Collection)
 
-Only the paths below are builder inputs. A clean checkout contains neither `Contant/` nor `raw-inputs/`. For local staging, copy exactly the nine listed Tanzil XML basenames from flat `Contant/` to `raw-inputs/tanzil/` without renaming (`Contant/tanzil/` is not a source path). Copy `Contant/quranic-corpus-morphology-0.4.zip` to `raw-inputs/corpus/` unchanged; use only its `quranic-corpus-morphology-0.4.txt` member, not the loose extraction. Do not glob, use other exports, or commit raw data.
+Only the paths below are builder inputs. A clean checkout contains neither `Contant/` nor `raw-inputs/`. For local staging, copy exactly the nine listed Tanzil XML basenames from flat `Contant/` to `raw-inputs/tanzil/` without renaming (`Contant/tanzil/` is not a source path). Copy `Contant/quranic-corpus-morphology-0.4.zip` to `raw-inputs/corpus/` unchanged; use only its `quranic-corpus-morphology-0.4.txt` member, not the loose extraction. For QUL inputs, stage byte-for-byte from direct subfolders under `Contant/` (`wbw/`, `tafsir/`, `translation/`, `mushaf/`, `recitation/`) to `raw-inputs/qul/` retaining relative directory structure and archive basenames. Do not glob, use other exports, or commit raw data.
+
+For Phase 3, run `python -B -m pipelines.common.stage_qul_inputs --content-root Contant --raw-root raw-inputs --audit-wbw` from the repository root, then verify the complete lock with `python -B -m pipelines.common.lock_inputs --registry sources/registry.json --raw-root raw-inputs --output sources/manifest.lock.json --verify`. The SQLite WBW archives are audited against their JSON equivalents; only the JSON formats supply WBW builder rows.
 
 ```text
 raw-inputs/
@@ -53,9 +55,32 @@ raw-inputs/
 │   ├── muslim.json
 │   └── ...
 └── qul/
-    ├── wbw-en.json
-    ├── tafsir-ar-ibn-kathir.json
-    └── ...
+    ├── wbw/
+    │   ├── english-wbw-translation.json.zip
+    │   ├── english-wbw-translation.db.zip
+    │   ├── english-wbw-transliteration.json.zip
+    │   └── english-wbw-transliteration.db.zip
+    ├── tafsir/
+    │   ├── ar-tafsir-ibn-kathir.json.zip
+    │   ├── ar-tafsir-al-tabari.json.zip
+    │   ├── ar-tafseer-al-qurtubi.json.zip
+    │   ├── ar-tafsir-al-wasit.json.zip
+    │   ├── tafsir-al-razi.json.zip
+    │   └── en-tafisr-ibn-kathir.json.zip
+    ├── translation/
+    │   └── en-sahih-international-with-footnote-tags.json.zip
+    ├── mushaf/
+    │   ├── qpc-v2-15-lines.db.zip
+    │   ├── qudratullah-indopak-15-lines.db.zip
+    │   └── qpc-hafs-tajweed.json.zip
+    └── recitation/
+        ├── ayah-recitation-abdul-basit-abdul-samad-mujawwad-hafs-949.json.zip
+        ├── ayah-recitation-abdul-basit-abdul-samad-murattal-hafs-950.json.zip
+        ├── ayah-recitation-mahmoud-khalil-al-husary-murattal-hafs-955.json.zip
+        ├── ayah-recitation-mahmoud-khalil-al-husary-mujawwad-hafs-956.json.zip
+        ├── ayah-recitation-mahmoud-khalil-al-husary-murattal-hafs-957-Muallim.json.zip
+        ├── ayah-recitation-muhammad-siddiq-al-minshawi-murattal-hafs-959.json.zip
+        └── ayah-recitation-mohamed-al-tablawi-recitation-murattal-hafs-73.json.zip
 ```
 
 Copy each exact filename below from `Contant/Adhan/` to `raw-inputs/audio/adhan/{slug}.mp3`. The same stable slug identifies both outputs.
@@ -212,16 +237,17 @@ Unless qualified, builder section references below point to `ARCHITECTURE.md`. I
 
 ### Phase 3: Milestone `v0.3.0` — QUL Integration (WBW, Tajweed, Extended Tafsirs & Recitations)
 **Objective:** Layer QUL's rich JSON datasets onto the canonical `surah:ayah:word` coordinate system while auditing per-resource licenses.
-* [ ] **Task 3.1 (QUL License Audit):** Audit each selected QUL dataset individually (WBW English, modern English translation such as Saheeh International, Ibn Kathir AR/EN, Tafsir Al-Muyassar, Mushaf layouts, Tajweed) and record redistribution status in `sources/licenses/`. Remember: QUL's GitHub `MIT` license covers its software, not every hosted dataset.
+* [x] **Task 3.1 (QUL License Audit):** Audit each selected QUL dataset individually (WBW English translation/transliteration, modern English translation Saheeh International, six commentary editions: Arabic Ibn Kathir, Al-Tabari, Al-Qurtubi, Al-Wasit, Al-Razi, English Ibn Kathir; two Mushaf layouts, Tajweed, seven recitation timing editions) and record redistribution status in `sources/licenses/`. Remember: QUL's GitHub `MIT` license covers its software, not every hosted dataset.
 * [ ] **Task 3.2 (`quran-wbw-en.db`):** Implement `build_quran_wbw.py` ingesting QUL WBW JSON keyed by `word_key` (`surah:ayah:word`) so it joins cleanly with `quran-morphology.db` via `ATTACH DATABASE`.
 * [ ] **Task 3.3 (Quality Gate #8 — Word Alignment):** Implement cross-pack validator verifying word counts per ayah between `quran-morphology.db` (QAC 0.4) and `quran-wbw-en.db` (QUL), deterministically normalizing non-word waqf/pause tokens and logging any deltas in `coverage_report`.
-* [ ] **Task 3.4 (Extended Tafsirs & Modern Translations):** Compile collected QUL Tafsir JSONs (`ar-ibn-kathir`, `en-ibn-kathir`, `ar-muyassar`, `ar-saadi`) and `en.sahih` using existing builders.
+* [ ] **Task 3.4 (Extended Tafsirs & Modern Translations):** Compile collected QUL commentary JSONs (`ar-ibn-kathir`, `ar-tabari`, `ar-qurtubi`, `ar-wasit`, `ar-razi`, `en-ibn-kathir`) and `en.sahih` (`quran-tr-en-sahih`) using existing builders.
 * [ ] **Task 3.5 (Tajweed & Mushaf Layouts):** Finalize `quran_mushaf.v1.sql` and build `quran-mushaf-{layout}.db` (line-by-line Madani/IndoPak page mapping + Tajweed markup).
-* [ ] **Task 3.6 (Recitation Audio Manifests):** Define an explicit new manifest contract for QUL reciter metadata and ayah/word timing; do not add recitation fields to the closed Adhan v1 schema. Keep multi-GB audio libraries external and timing packs lightweight.
-* [ ] **Task 3.7 (Global Adhan Expansion):** Add license-cleared Makkah, Madinah, Al-Aqsa, and Fajr Adhans to `audio-adhan-core`.
-
+* [ ] **Task 3.6 (Recitation Audio Manifests):** Define an explicit new manifest contract for QUL reciter metadata and ayah/word timing across all seven timing editions (Abdul Basit Mujawwad, Abdul Basit Murattal, Al-Husary Muallim, Al-Husary Mujawwad, Al-Husary Murattal, Al-Minshawi Murattal, Al-Tablawi Murattal); do not add recitation fields to the closed Adhan v1 schema. Keep multi-GB audio libraries external and timing packs lightweight.
 **Definition of Done:** A cross-database `ATTACH` query combining `quran-core.db` + `quran-morphology.db` + `quran-wbw-en.db` returns verb frequency concordance with English word meanings and full ayah text in under 10 ms.
 
+
+### Milestone `v0.3.1` — Global Adhan Expansion
+* [ ] **Task 3.7 (Global Adhan Expansion):** Add license-cleared Makkah, Madinah, Al-Aqsa, and Fajr Adhans to `audio-adhan-core`.
 ---
 
 ### Phase 4: Milestone `v1.0.0` — Developer SDK & First Consumer Integration
