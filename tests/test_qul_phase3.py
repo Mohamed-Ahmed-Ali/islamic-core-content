@@ -983,6 +983,10 @@ def test_task_3_2_wbw_pack_writer_and_fts(tmp_path: Path) -> None:
         assert cov_rows["ar_present"] == (17, None)
         assert cov_rows["en_present"] == (17, None)
         assert cov_rows["en_missing"] == (0, None)
+        assert cov_rows["alignment_markers_removed"] == (2, None)
+        assert cov_rows["alignment_rekeyed_ayahs"] == (1, "2:181")
+        assert cov_rows["alignment_raw_delta:1:1"] == (1, "QUL raw=5; normalized=4; delta=-1")
+        assert cov_rows["alignment_raw_delta:2:181"] == (1, "QUL raw=14; normalized=13; delta=-1")
 
         # Verify row counts and Arabic storage fidelity
         cur.execute("SELECT COUNT(*) FROM word_translations;")
@@ -1132,6 +1136,179 @@ def test_task_3_2_loaders_mismatch_diagnostics_include_missing_and_extra(tmp_pat
     assert "missing=" in msg_pron and "extra=" in msg_pron
     assert "1:2" in msg_pron and "1:3" in msg_pron
 
+
+# ---------------------------------------------------------------------------
+# Task 3.3: Phase 3 concordance and word alignment proof query
+# ---------------------------------------------------------------------------
+
+def _create_concordance_test_dbs(
+    tmp_path: Path,
+    *,
+    lemma: str = "Eabada",
+    verb_count: int = 1,
+    translation: str = "we worship",
+    text_uthmani: str = "إِيَّاكَ نَعْبُدُ وَإِيَّاكَ نَسْتَعِينُ",
+    special_glosses: dict[str, str] | None = None,
+) -> tuple[Path, Path, Path]:
+    core_path = tmp_path / "quran-core.db"
+    morph_path = tmp_path / "quran-morphology.db"
+    wbw_path = tmp_path / "quran-wbw-en.db"
+
+    with sqlite3.connect(core_path) as conn:
+        conn.execute(
+            "CREATE TABLE ayahs ("
+            "id INTEGER PRIMARY KEY CHECK (id BETWEEN 1 AND 6236), "
+            "surah_id INTEGER NOT NULL, "
+            "ayah_number INTEGER NOT NULL, "
+            "verse_key TEXT NOT NULL UNIQUE, "
+            "text_uthmani TEXT NOT NULL);"
+        )
+        conn.execute(
+            "INSERT INTO ayahs (id, surah_id, ayah_number, verse_key, text_uthmani) "
+            "VALUES (1, 1, 5, '1:5', ?);",
+            (text_uthmani,),
+        )
+
+    with sqlite3.connect(morph_path) as conn:
+        conn.execute(
+            "CREATE TABLE verb_concordance ("
+            "id INTEGER PRIMARY KEY, "
+            "verb_buckwalter TEXT NOT NULL, "
+            "total_count INTEGER NOT NULL);"
+        )
+        conn.execute(
+            "CREATE TABLE words ("
+            "id INTEGER PRIMARY KEY, "
+            "ayah_id INTEGER NOT NULL, "
+            "word_number INTEGER NOT NULL, "
+            "word_key TEXT NOT NULL UNIQUE, "
+            "verb_concordance_id INTEGER REFERENCES verb_concordance(id));"
+        )
+        conn.execute(
+            "INSERT INTO verb_concordance (id, verb_buckwalter, total_count) "
+            "VALUES (1, ?, ?);",
+            (lemma, verb_count),
+        )
+        conn.execute(
+            "INSERT INTO words (id, ayah_id, word_number, word_key, verb_concordance_id) "
+            "VALUES (1, 1, 2, '1:5:2', 1);"
+        )
+
+    if special_glosses is None:
+        special_glosses = {
+            "2:181:4": "he (has) heard [it]",
+            "8:6:5": "was made clear",
+            "13:37:9": "came to you",
+        }
+
+    with sqlite3.connect(wbw_path) as conn:
+        conn.execute(
+            "CREATE TABLE word_translations ("
+            "id INTEGER PRIMARY KEY, "
+            "ayah_id INTEGER NOT NULL, "
+            "word_number INTEGER NOT NULL, "
+            "word_key TEXT NOT NULL UNIQUE, "
+            "text_uthmani TEXT NOT NULL, "
+            "translation TEXT NOT NULL, "
+            "transliteration TEXT);"
+        )
+        conn.execute(
+            "INSERT INTO word_translations (id, ayah_id, word_number, word_key, text_uthmani, translation, transliteration) "
+            "VALUES (1, 1, 2, '1:5:2', 'نَعْبُدُ', ?, 'naʿbudu');",
+            (translation,),
+        )
+        next_id = 2
+        for w_key, gloss in special_glosses.items():
+            conn.execute(
+                "INSERT INTO word_translations (id, ayah_id, word_number, word_key, text_uthmani, translation, transliteration) "
+                "VALUES (?, 188, 1, ?, 'dummy', ?, NULL);",
+                (next_id, w_key, gloss),
+            )
+            next_id += 1
+
+    return core_path, morph_path, wbw_path
+
+
+def test_task_3_3_concordance_cli_arg_handling() -> None:
+    from pipelines.validators.phase3_concordance import main
+
+    assert main([]) == 2
+    assert main(["/nonexistent/directory/path/for/concordance"]) == 1
+
+
+def test_task_3_3_concordance_missing_files(tmp_path: Path) -> None:
+    from pipelines.validators.phase3_concordance import validate_phase3_concordance
+
+    # Empty dir
+    with pytest.raises(FileNotFoundError, match="quran-core.db"):
+        validate_phase3_concordance(tmp_path)
+
+    # Missing morphology
+    (tmp_path / "quran-core.db").touch()
+    with pytest.raises(FileNotFoundError, match="quran-morphology.db"):
+        validate_phase3_concordance(tmp_path)
+
+    # Missing WBW
+    (tmp_path / "quran-morphology.db").touch()
+    with pytest.raises(FileNotFoundError, match="quran-wbw-en.db"):
+        validate_phase3_concordance(tmp_path)
+
+
+@pytest.fixture
+def concordance_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep semantic fixtures independent of scheduler delays; measure pinned packs separately."""
+    from itertools import count
+    from types import SimpleNamespace
+
+    from pipelines.validators import phase3_concordance
+
+    clock = SimpleNamespace(perf_counter_ns=count(step=1000).__next__)
+    monkeypatch.setattr(phase3_concordance, "time", clock)
+
+
+def test_task_3_3_concordance_happy_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], concordance_clock: None,
+) -> None:
+    from pipelines.validators.phase3_concordance import validate_phase3_concordance
+
+    _create_concordance_test_dbs(tmp_path)
+    validate_phase3_concordance(tmp_path)
+    captured = capsys.readouterr()
+    assert "20 samples" in captured.out
+
+
+def test_task_3_3_concordance_mismatched_lemma_or_gloss(
+    tmp_path: Path, concordance_clock: None,
+) -> None:
+    from pipelines.validators.phase3_concordance import validate_phase3_concordance
+
+    # Mismatched lemma
+    dir_lemma = tmp_path / "bad_lemma"
+    dir_lemma.mkdir()
+    _create_concordance_test_dbs(dir_lemma, lemma="wrong_lemma")
+    with pytest.raises(ValueError, match="Expected verb_buckwalter 'Eabada'"):
+        validate_phase3_concordance(dir_lemma)
+
+    # Mismatched translation
+    dir_trans = tmp_path / "bad_trans"
+    dir_trans.mkdir()
+    _create_concordance_test_dbs(dir_trans, translation="wrong translation")
+    with pytest.raises(ValueError, match="Expected translation 'we worship'"):
+        validate_phase3_concordance(dir_trans)
+
+    # Mismatched special gloss
+    dir_gloss = tmp_path / "bad_gloss"
+    dir_gloss.mkdir()
+    _create_concordance_test_dbs(
+        dir_gloss,
+        special_glosses={
+            "2:181:4": "wrong gloss",
+            "8:6:5": "was made clear",
+            "13:37:9": "came to you",
+        },
+    )
+    with pytest.raises(ValueError, match="Special gloss mismatch for 2:181:4"):
+        validate_phase3_concordance(dir_gloss)
 
 # ---------------------------------------------------------------------------
 # Task 3.3: Word alignment validator

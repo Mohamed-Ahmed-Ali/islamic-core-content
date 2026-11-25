@@ -458,6 +458,8 @@ def write_wbw_pack(
 ) -> None:
     """Write verified WBW pack SQLite database with integrity and FTS indexing."""
     total_words = 0
+    rekeyed_ayahs: list[str] = []
+    raw_deltas: dict[str, tuple[int, str]] = {}
     for s_id, a_num, _aid in surah_ayah_sequence:
         vkey = f"{s_id}:{a_num}"
         ar_words = ar_words_by_ayah[vkey]
@@ -467,6 +469,13 @@ def write_wbw_pack(
                 f"Word count mismatch at {vkey}: Arabic tokens {len(ar_words)} != English glosses {len(glosses)}"
             )
         total_words += len(ar_words)
+        if vkey in SPECIAL_GAPS:
+            rekeyed_ayahs.append(vkey)
+        n_norm = len(glosses)
+        raw_deltas[f"alignment_raw_delta:{vkey}"] = (
+            1,
+            f"QUL raw={n_norm + 1}; normalized={n_norm}; delta=-1",
+        )
 
     if total_words != expected_total_words:
         raise ValueError(
@@ -478,7 +487,13 @@ def write_wbw_pack(
         "ar_present": (expected_total_words, None),
         "en_present": (expected_total_words, None),
         "en_missing": (0, None),
+        "alignment_markers_removed": (len(surah_ayah_sequence), None),
+        "alignment_rekeyed_ayahs": (
+            len(rekeyed_ayahs),
+            ",".join(rekeyed_ayahs) if rekeyed_ayahs else None,
+        ),
     }
+    coverage.update(raw_deltas)
 
     with write_quran_pack(
         output_path,

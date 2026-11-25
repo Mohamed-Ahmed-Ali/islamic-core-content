@@ -238,6 +238,8 @@ Every listed `pack_meta` key is present exactly once, with a nonblank value, and
 
 Count distinct members of the expected population. `en_missing = expected_total - en_present`. Blank means empty after Unicode whitespace trimming; do not trim persisted text. `completeness` is `complete` only when every expected member has all required content and applicable language coverage and no extra members; otherwise `partial`. Missing text permitted by a profile still needs correct metrics and flags. Catalog `coverage.available` counts members with all that content simultaneously (Hadith: both full texts; WBW: Arabic and meaning). §9 determines allowed partial coverage. No other persisted metrics in the fixture or v0.1.0 profiles.
 
+The local QUL English WBW pack also records the number of removed terminal verse markers (`alignment_markers_removed`), the number and keys of rekeyed verses (`alignment_rekeyed_ayahs`), and each nonzero change in the source row count (`alignment_raw_delta:<verse_key>`). These metrics come from locked QUL meanings, not from the separately licensed morphology pack.
+
 ---
 
 ## 6. Canonical Database Schemas (v1)
