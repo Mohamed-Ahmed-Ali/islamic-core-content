@@ -161,7 +161,7 @@ Data is split into granular, independently downloadable packs so apps only downl
 | `quran-tafsir-ar-jalalayn` | SQLite | `none` | Tanzil XML | Not cleared for v0.1.0 |
 | `quran-tafsir-{lang}-{slug}` | SQLite | `none` | QUL JSON | Audited per-pack |
 | `quran-wbw-{lang}` | SQLite | `none` | QUL JSON | Audited per-pack |
-| `quran-mushaf-{layout}` | SQLite | `none` | QUL JSON (Tajweed + page lines) | Audited per-pack |
+| `quran-mushaf-{layout}` | SQLite | `none` | QUL SQLite page lines + QPC Hafs Tajweed JSON | Audited per-pack |
 | `quran-morphology` | SQLite | `none` | Quranic Arabic Corpus 0.4 | `GPL-3.0` (isolated) |
 | `hadith-{book}` | SQLite | `none` | Sunnah.com JSON | Audited per-pack |
 | `audio-adhan-core` | M4A + CAF | Native audio | Six Adhan masters | None cleared for v0.1.0 |

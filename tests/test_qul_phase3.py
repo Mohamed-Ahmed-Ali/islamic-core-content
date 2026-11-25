@@ -1264,3 +1264,349 @@ def test_task_3_3_word_alignment_missing_file_and_empty_core(tmp_path: Path) -> 
     with pytest.raises(ValueError, match="contains no ayahs"):
         validate_word_alignment(empty_core, morph_p, wbw_p)
 
+
+
+# ---------------------------------------------------------------------------
+# Task 3.5 tests: Page layouts and Tajweed pack builder
+# ---------------------------------------------------------------------------
+
+def test_task_3_5_mushaf_builder_cli_arg_handling() -> None:
+    from pipelines.builders.build_quran_mushaf import main
+
+    # Missing required --pack
+    assert main(["--sources-root", "/tmp/nonexistent", "--output-dir", "/tmp/nonexistent"]) == 2
+
+    # Invalid choice for --pack
+    assert main(["--sources-root", "/tmp/nonexistent", "--output-dir", "/tmp/nonexistent", "--pack", "unknown-pack"]) == 2
+
+    # Nonexistent sources-root
+    assert main(["--sources-root", "/tmp/nonexistent_sources_root_dir", "--output-dir", "/tmp/out", "--pack", "quran-mushaf-madani-v2"]) == 2
+
+def test_task_3_5_builder_rejects_unsupported_pack(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from pipelines.builders.build_quran_mushaf import build_quran_mushaf
+    monkeypatch.setattr("pipelines.builders.build_quran_mushaf.verify_runtime", lambda: (Path("ffmpeg"), Path("ffprobe")))
+    with pytest.raises(ValueError, match="Unknown or unsupported mushaf pack ID"):
+        build_quran_mushaf(tmp_path, tmp_path, pack_id="invalid-pack")
+
+
+def test_task_3_5_layout_info_validation() -> None:
+    from pipelines.builders.build_quran_mushaf import validate_layout_info
+
+    # Empty info table
+    con = sqlite3.connect(":memory:")
+    con.execute("CREATE TABLE info (name TEXT, number_of_pages INT, lines_per_page INT, font_name TEXT);")
+    with pytest.raises(ValueError, match="Expected exactly 1 row"):
+        validate_layout_info(con, expected_pages=604)
+
+    # Multiple rows in info table
+    con.execute("INSERT INTO info VALUES ('A', 604, 15, 'f1');")
+    con.execute("INSERT INTO info VALUES ('B', 604, 15, 'f2');")
+    with pytest.raises(ValueError, match="Expected exactly 1 row"):
+        validate_layout_info(con, expected_pages=604)
+
+    # Blank name
+    con.execute("DELETE FROM info;")
+    con.execute("INSERT INTO info VALUES ('   ', 604, 15, 'font_v2');")
+    with pytest.raises(ValueError, match="nonblank"):
+        validate_layout_info(con, expected_pages=604)
+
+    # Blank font_name
+    con.execute("DELETE FROM info;")
+    con.execute("INSERT INTO info VALUES ('QPC V2', 604, 15, '');")
+    with pytest.raises(ValueError, match="nonblank"):
+        validate_layout_info(con, expected_pages=604)
+
+    # Wrong page count
+    con.execute("DELETE FROM info;")
+    con.execute("INSERT INTO info VALUES ('QPC V2', 605, 15, 'font_v2');")
+    with pytest.raises(ValueError, match="page count mismatch"):
+        validate_layout_info(con, expected_pages=604)
+
+    # Wrong lines per page
+    con.execute("DELETE FROM info;")
+    con.execute("INSERT INTO info VALUES ('QPC V2', 604, 16, 'font_v2');")
+    with pytest.raises(ValueError, match="lines_per_page mismatch"):
+        validate_layout_info(con, expected_pages=604)
+
+    # Valid info row returns exact fields
+    con.execute("DELETE FROM info;")
+    con.execute("INSERT INTO info VALUES ('QPC V2 15 Lines', 604, 15, 'qpc_v2');")
+    row = validate_layout_info(con, expected_pages=604)
+    assert row == ("QPC V2 15 Lines", 604, 15, "qpc_v2")
+    con.close()
+
+
+def test_task_3_5_page_lines_validation_and_null_conversion() -> None:
+    from pipelines.builders.build_quran_mushaf import validate_page_lines
+
+    con = sqlite3.connect(":memory:")
+    con.execute(
+        "CREATE TABLE pages ("
+        "page_number INT, line_number INT, line_type TEXT, is_centered INT, "
+        "first_word_id INT, last_word_id INT, surah_number INT);"
+    )
+
+    # Empty string in optional numeric column converted to NULL / None
+    con.execute("INSERT INTO pages VALUES (1, 1, 'surah_name', 1, '', '', 1);")
+    con.execute("INSERT INTO pages VALUES (1, 2, 'basmallah', 1, '', '', '');")
+    for l in range(3, 9):
+        con.execute(f"INSERT INTO pages VALUES (1, {l}, 'ayah', 0, {(l-3)*3 + 1}, {(l-3)*3 + 3}, '');")
+    for l in range(1, 9):
+        con.execute(f"INSERT INTO pages VALUES (2, {l}, 'ayah', 0, {18 + (l-1)*3 + 1}, {18 + (l-1)*3 + 3}, '');")
+
+    rows = validate_page_lines(con, expected_pages=2, expected_lines=16)
+    assert rows[0] == (1, 1, "surah_name", 1, None, None, 1)
+    assert rows[1] == (1, 2, "basmallah", 1, None, None, None)
+    assert rows[2] == (1, 3, "ayah", 0, 1, 3, None)
+
+    # Wrong type: string representing integer in optional field
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'surah_name', 1, NULL, NULL, 'bad_int');")
+    with pytest.raises(ValueError, match="[Ii]nvalid type|[Ww]rong type"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Wrong type: boolean in is_centered
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'surah_name', 2, NULL, NULL, 1);")
+    with pytest.raises(ValueError, match="is_centered"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Wrong line type
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'footer', 0, NULL, NULL, NULL);")
+    with pytest.raises(ValueError, match="line_type"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Ayah line with surah_number not None
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'ayah', 0, 1, 3, 1);")
+    with pytest.raises(ValueError, match="ayah.*surah_number"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Ayah line with missing word range
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'ayah', 0, NULL, 3, NULL);")
+    with pytest.raises(ValueError, match="ayah.*word range"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Ayah line with non-positive word ID
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'ayah', 0, 0, 3, NULL);")
+    with pytest.raises(ValueError, match="positive"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Ayah line with first > last
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'ayah', 0, 5, 3, NULL);")
+    with pytest.raises(ValueError, match="first.*last"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Surah name with word IDs
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'surah_name', 1, 1, NULL, 1);")
+    with pytest.raises(ValueError, match="surah_name.*word"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Surah name with out of range surah number (115)
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'surah_name', 1, NULL, NULL, 115);")
+    with pytest.raises(ValueError, match="surah_number.*1..114"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Basmallah with non-null optional field
+    con.execute("DELETE FROM pages;")
+    con.execute("INSERT INTO pages VALUES (1, 1, 'basmallah', 1, NULL, NULL, 1);")
+    with pytest.raises(ValueError, match="basmallah"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+    con.close()
+
+
+def test_task_3_5_page_lines_rejects_overlapping_or_nonincreasing_word_range() -> None:
+    from pipelines.builders.build_quran_mushaf import validate_page_lines
+
+    con = sqlite3.connect(":memory:")
+    con.execute(
+        "CREATE TABLE pages ("
+        "page_number INT, line_number INT, line_type TEXT, is_centered INT, "
+        "first_word_id INT, last_word_id INT, surah_number INT);"
+    )
+    # Page 1: 8 lines. Line 3 has word range 1..5. Line 4 has overlapping word range 5..8 (5 <= 5)
+    con.execute("INSERT INTO pages VALUES (1, 1, 'surah_name', 1, NULL, NULL, 1);")
+    con.execute("INSERT INTO pages VALUES (1, 2, 'basmallah', 1, NULL, NULL, NULL);")
+    con.execute("INSERT INTO pages VALUES (1, 3, 'ayah', 0, 1, 5, NULL);")
+    con.execute("INSERT INTO pages VALUES (1, 4, 'ayah', 0, 5, 8, NULL);")
+    for l in range(5, 9):
+        con.execute(f"INSERT INTO pages VALUES (1, {l}, 'ayah', 0, {(l-4)*4 + 9}, {(l-4)*4 + 12}, NULL);")
+    for l in range(1, 9):
+        con.execute(f"INSERT INTO pages VALUES (2, {l}, 'ayah', 0, {30 + (l-1)*3 + 1}, {30 + (l-1)*3 + 3}, NULL);")
+    with pytest.raises(ValueError, match="[Oo]verlapp|[Nn]on-increasing"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+    con.close()
+
+
+def test_task_3_5_page_lines_structure_and_counts() -> None:
+    from pipelines.builders.build_quran_mushaf import validate_page_lines
+
+    con = sqlite3.connect(":memory:")
+    con.execute(
+        "CREATE TABLE pages ("
+        "page_number INT, line_number INT, line_type TEXT, is_centered INT, "
+        "first_word_id INT, last_word_id INT, surah_number INT);"
+    )
+
+    # Page 1 has 7 lines instead of 8
+    for l in range(1, 8):
+        con.execute(f"INSERT INTO pages VALUES (1, {l}, 'ayah', 0, {(l-1)*3 + 1}, {(l-1)*3 + 3}, NULL);")
+    for l in range(1, 9):
+        con.execute(f"INSERT INTO pages VALUES (2, {l}, 'ayah', 0, {25 + (l-1)*3 + 1}, {25 + (l-1)*3 + 3}, NULL);")
+    with pytest.raises(ValueError, match="line count mismatch"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Page 1 has line numbers with a gap: 1, 2, 4..9 (total 8 lines, but gap)
+    con.execute("DELETE FROM pages;")
+    for idx, l in enumerate([1, 2, 4, 5, 6, 7, 8, 9], start=1):
+        con.execute(f"INSERT INTO pages VALUES (1, {l}, 'ayah', 0, {(idx-1)*3 + 1}, {(idx-1)*3 + 3}, NULL);")
+    for l in range(1, 9):
+        con.execute(f"INSERT INTO pages VALUES (2, {l}, 'ayah', 0, {30 + (l-1)*3 + 1}, {30 + (l-1)*3 + 3}, NULL);")
+    with pytest.raises(ValueError, match="[Gg]ap|[Ll]ine number"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+
+    # Page missing: page 1 then page 3
+    con.execute("DELETE FROM pages;")
+    for l in range(1, 9):
+        con.execute(f"INSERT INTO pages VALUES (1, {l}, 'ayah', 0, {(l-1)*3 + 1}, {(l-1)*3 + 3}, NULL);")
+    for l in range(1, 9):
+        con.execute(f"INSERT INTO pages VALUES (3, {l}, 'ayah', 0, {30 + (l-1)*3 + 1}, {30 + (l-1)*3 + 3}, NULL);")
+    with pytest.raises(ValueError, match="[Pp]age"):
+        validate_page_lines(con, expected_pages=2, expected_lines=16)
+    con.close()
+
+
+def test_task_3_5_tajweed_markup_validation(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_mushaf import validate_tajweed_verses
+
+    # Invalid tag in verse markup
+    bad_data = {
+        "1:1": {
+            "id": 1,
+            "verse_key": "1:1",
+            "surah": 1,
+            "ayah": 1,
+            "text": "بِسۡمِ <foo>ٱ</foo>للَّهِ ١",
+        }
+    }
+    bad_zip = tmp_path / "bad_tajweed.json.zip"
+    bad_zip.write_bytes(_make_zip_bytes("bad_tajweed.json", json.dumps(bad_data).encode("utf-8")))
+
+    with pytest.raises(ValueError, match="Invalid tag"):
+        validate_tajweed_verses(bad_zip, {"1:1": 1}, expected_count=1)
+
+    # Valid markup with <rule class=...> and nested depth <= 2
+    good_data = {
+        "1:1": {
+            "id": 1,
+            "verse_key": "1:1",
+            "surah": 1,
+            "ayah": 1,
+            "text": "بِسۡمِ <rule class=ham_wasl>ٱ</rule>للَّهِ <rule class=ham_wasl>ٱ</rule><rule class=laam_shamsiyah>ل</rule>رَّحۡمَ<rule class=madda_normal>ـٰ</rule>نِ ١",
+        },
+        "1:2": {
+            "id": 2,
+            "verse_key": "1:2",
+            "surah": 1,
+            "ayah": 2,
+            "text": "ٱلۡحَمۡدُ لِلَّهِ رَبِّ ٱلۡعَـٰلَمِينَ ٢",
+        },
+    }
+    good_zip = tmp_path / "good_tajweed.json.zip"
+    good_zip.write_bytes(_make_zip_bytes("good_tajweed.json", json.dumps(good_data).encode("utf-8")))
+
+    rows = validate_tajweed_verses(good_zip, {"1:1": 1, "1:2": 2}, expected_count=2)
+    assert len(rows) == 2
+    assert rows[0] == (1, "1:1", good_data["1:1"]["text"])
+    assert rows[1] == (2, "1:2", good_data["1:2"]["text"])
+
+
+def test_task_3_5_mushaf_pack_writer_and_schema(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_mushaf import write_mushaf_pack
+
+    repo_root = Path(__file__).resolve().parents[1]
+    schema_path = repo_root / "specs" / "sql" / "quran_mushaf.v1.sql"
+    out_db = tmp_path / "quran-mushaf-madani-v2.db"
+
+    metadata = {
+        "category": "quran",
+        "completeness": "complete",
+        "fts5_enabled": "0",
+        "id": "quran-mushaf-madani-v2",
+        "languages": "ar",
+        "license": "LicenseRef-QUL-Unreviewed",
+        "pack_version": "0.3.0",
+        "provenance": "QUL",
+        "schema_version": "1",
+    }
+    layout_info_row = ("QPC V2 15 Lines", 604, 15, "qpc_v2")
+    page_lines_rows = [
+        (1, 1, "surah_name", 1, None, None, 1),
+        (1, 2, "basmallah", 1, None, None, None),
+        (1, 3, "ayah", 0, 1, 4, None),
+    ]
+    tajweed_rows = [
+        (1, "1:1", "بِسۡمِ <rule class=ham_wasl>ٱ</rule>للَّهِ ١"),
+    ]
+
+    write_mushaf_pack(
+        out_db,
+        schema_path,
+        metadata,
+        layout_info_row,
+        page_lines_rows,
+        tajweed_rows,
+        expected_total=6236,
+    )
+
+    assert out_db.is_file()
+    con = sqlite3.connect(f"{out_db.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        cur = con.cursor()
+        cur.execute("PRAGMA integrity_check;")
+        assert cur.fetchall() == [("ok",)]
+
+        # Verify pack_meta
+        cur.execute("SELECT key, value FROM pack_meta ORDER BY key;")
+        meta = dict(cur.fetchall())
+        assert meta["pack_version"] == "0.3.0"
+        assert meta["fts5_enabled"] == "0"
+        assert meta["id"] == "quran-mushaf-madani-v2"
+
+        # Verify coverage_report
+        cur.execute("SELECT metric, count FROM coverage_report ORDER BY metric;")
+        cov = dict(cur.fetchall())
+        assert cov["expected_total"] == 6236
+        assert cov["ar_present"] == 6236
+
+        # Verify layout_info
+        cur.execute("SELECT id, name, page_count, lines_per_page, font_name FROM layout_info;")
+        info_rows = cur.fetchall()
+        assert info_rows == [(1, "QPC V2 15 Lines", 604, 15, "qpc_v2")]
+
+        # Verify page_lines representative rows
+        cur.execute(
+            "SELECT page_number, line_number, line_type, is_centered, "
+            "first_word_id, last_word_id, surah_number FROM page_lines ORDER BY page_number, line_number;"
+        )
+        pl_rows = cur.fetchall()
+        assert pl_rows[0] == (1, 1, "surah_name", 1, None, None, 1)
+        assert pl_rows[1] == (1, 2, "basmallah", 1, None, None, None)
+        assert pl_rows[2] == (1, 3, "ayah", 0, 1, 4, None)
+
+        # Verify tajweed_ayahs
+        cur.execute("SELECT ayah_id, verse_key, text_markup FROM tajweed_ayahs;")
+        tj_rows = cur.fetchall()
+        assert tj_rows == [(1, "1:1", "بِسۡمِ <rule class=ham_wasl>ٱ</rule>للَّهِ ١")]
+
+        # Verify no FTS tables exist
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '%fts%';")
+        assert cur.fetchall() == []
+    finally:
+        con.close()
