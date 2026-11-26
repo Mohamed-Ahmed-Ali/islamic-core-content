@@ -48,6 +48,34 @@
     "sourceUrl": "https://corpus.quran.com/download/",
     "sourceVersion": "0.4"
   },
+  "hadith-taqreeb/01_jame3_al_usul_al_tisah.json": {
+    "packIds": [
+      "hadith-taqreeb-jami"
+    ],
+    "sourceUrl": "https://sunnahenc.com/about",
+    "sourceVersion": "android-apk-3.0.4-realm-export+sha256:6158e62d02556a7828a49938c090ec93d1874e2e0f3cb718e7413f066273a4fd"
+  },
+  "hadith-taqreeb/02_maalem_al_sunnah_al_nabawiyyah.json": {
+    "packIds": [
+      "hadith-taqreeb-maalim"
+    ],
+    "sourceUrl": "https://sunnahenc.com/about",
+    "sourceVersion": "android-apk-3.0.4-realm-export+sha256:8c114bb63c2f25f6bd214b55198b5c99e06d0f5217a1b62dc5882ccf3d0102e9"
+  },
+  "hadith-taqreeb/03_al_wajeez.json": {
+    "packIds": [
+      "hadith-taqreeb-wajeez"
+    ],
+    "sourceUrl": "https://sunnahenc.com/about",
+    "sourceVersion": "android-apk-3.0.4-realm-export+sha256:3b3e5bfb4f8060c13957944f3d250c2dcd09b9776ef214b9ecb15d61d67618d7"
+  },
+  "hadith-taqreeb/04_al_ahadith_al_kulliyyah.json": {
+    "packIds": [
+      "hadith-taqreeb-kulliyyah"
+    ],
+    "sourceUrl": "https://hawamech.com/ar/product/%D8%A7%D9%84%D8%A3%D8%AD%D8%A7%D8%AF%D9%8A%D8%AB-%D8%A7%D9%84%D9%86%D8%A8%D9%88%D9%8A%D8%A9-%D8%A7%D9%84%D9%83%D9%84%D9%8A%D8%A9-%D8%A7%D9%84%D8%AA%D9%8A-%D8%B9%D9%84%D9%8A%D9%87%D8%A7-%D9%85%D8%AF/",
+    "sourceVersion": "android-apk-3.0.4-realm-export+sha256:e7990e9336315a97f7ca975e734a7ad97feebab93268de9aff8904efb25aee7c"
+  },
   "hadith/abudawud.json": {
     "packIds": [
       "hadith-abudawud"

@@ -147,6 +147,29 @@ A nonempty JSON array. Each object has exactly `verse_keys` (nonempty array of n
 
 Accept this singleton/range pair against an oracle of `1:1`–`1:3`; reject wrong types or formats at schema validation, and reject unknown keys, gaps, overlaps, descending keys, cross-surah groups and map rows outside their entry at semantic validation. NDJSON is upstream only; both schemas reject it as builder input.
 
+### v1 Taqreeb input (`raw-inputs/hadith-taqreeb/{basename}`)
+
+Mashrūʿ Taqrīb as-Sunnah original Android Realm JSON exports by Shaykh Ṣāliḥ Aḥmad ash-Shāmī. Stage from `Contant/hadith/Hadith Saleh al-Shami/` to `raw-inputs/hadith-taqreeb/`:
+
+| Pack suffix | Book ID | Source Basename | Staged Path | SHA-256 |
+| --- | ---: | --- | --- | --- |
+| `jami` | 1 | `01_jame3_al_usul_al_tisah.json` | `raw-inputs/hadith-taqreeb/01_jame3_al_usul_al_tisah.json` | `6158e62d02556a7828a49938c090ec93d1874e2e0f3cb718e7413f066273a4fd` |
+| `maalim` | 2 | `02_maalem_al_sunnah_al_nabawiyyah.json` | `raw-inputs/hadith-taqreeb/02_maalem_al_sunnah_al_nabawiyyah.json` | `8c114bb63c2f25f6bd214b55198b5c99e06d0f5217a1b62dc5882ccf3d0102e9` |
+| `wajeez` | 3 | `03_al_wajeez.json` | `raw-inputs/hadith-taqreeb/03_al_wajeez.json` | `3b3e5bfb4f8060c13957944f3d250c2dcd09b9776ef214b9ecb15d61d67618d7` |
+| `kulliyyah` | 4 | `04_al_ahadith_al_kulliyyah.json` | `raw-inputs/hadith-taqreeb/04_al_ahadith_al_kulliyyah.json` | `e7990e9336315a97f7ca975e734a7ad97feebab93268de9aff8904efb25aee7c` |
+
+Exact staging command:
+```sh
+python -B -m pipelines.common.stage_taqreeb_inputs --content-root Contant --raw-root raw-inputs --lock sources/manifest.lock.json
+```
+
+Exact verification command loop:
+```sh
+for suffix in jami maalim wajeez kulliyyah; do
+  python -B -m pipelines.common.lock_inputs --registry sources/registry.json --raw-root raw-inputs --output sources/manifest.lock.json --verify --pack "hadith-taqreeb-$suffix"
+done
+```
+
 ---
 
 ## 3. Phased Execution Roadmap
@@ -252,17 +275,27 @@ Unless qualified, builder section references below point to `ARCHITECTURE.md`. I
 * [ ] **Task 3.7 (Global Adhan Expansion):** Add license-cleared Makkah, Madinah, Al-Aqsa, and Fajr Adhans to `audio-adhan-core`.
 ---
 
-### Phase 4: Milestone `v1.0.0` — Developer SDK & First Consumer Integration
+### Phase 4: Milestone `v0.4.0` — Mashrūʿ Taqrīb as-Sunnah (Local Only)
+**Objective:** Deliver four local-only Arabic Taqrīb SQLite packs from four original Saleh al-Shami JSON exports.
+* [x] **Task 4.1 (Inventory, Audit, Staging & Lock):** Read-only inventory, audit, canonical staging, and lock.
+* [ ] **Task 4.2 (Schema, Builder & Search):** Dedicated schema, deterministic builder, and search.
+* [ ] **Task 4.3 (Pending Provenance):** Pending provenance records in `sources/licenses/`.
+* [ ] **Task 4.4 (Local Gate & Reproducibility):** Local quality gate `--profile hadith-taqreeb-local` and bit-for-bit reproducibility proof.
+**Definition of Done:** Two independent offline builds in the pinned Linux runtime produce four bit-for-bit identical SQLite packs (`hadith-taqreeb-{jami,maalim,wajeez,kulliyyah}.db`). The `--profile hadith-taqreeb-local` gate verifies full schema invariants, PRAGMA integrity, external-content FTS5 token search, exact source row traversal, anomaly preservation, coverage metrics, and equal SHA-256 digests across candidate and rebuild roots without network access or published release artifacts.
+
+---
+
+### Milestone `v1.0.0` — Developer SDK & First Consumer Integration
 **Objective:** Make integration effortless for your React Native / Expo app and external TypeScript developers without coupling the data repo to any app.
-* [ ] **Task 4.1 (`packages/core-sdk`):** Build a zero-UI TypeScript package providing:
+* [ ] **Task SDK.1 (`packages/core-sdk`):** Build a zero-UI TypeScript package providing:
   * Typed `Catalog` and `AudioManifest` parsers with runtime schema validation.
   * Diff engine (`getAvailableUpdates(remoteCatalog, installedPacks)`).
   * Transport-agnostic download, `sizeBytes`, and `SHA-256` verification interface.
-* [ ] **Task 4.2 (`packages/expo-adapter`):** Build an optional Expo helper implementing:
+* [ ] **Task SDK.2 (`packages/expo-adapter`):** Build an optional Expo helper implementing:
   * Atomic install flow: temporary download -> size & SHA-256 verification -> `PRAGMA quick_check` & `user_version` check -> atomic rename into local SQLite directory.
   * `user.db` `installed_packs` registry helper (keeping user state strictly separate from content `.db` files).
   * iOS `.caf` Adhan installation helper targeting `/Library/Sounds`.
-* [ ] **Task 4.3 (Consumer Smoke Test):** Integrate `@islamic-core/expo-adapter` into your first consumer app and verify FTS5 (`enableFTS: true`) plus iOS/Android Adhan playback on physical devices.
+* [ ] **Task SDK.3 (Consumer Smoke Test):** Integrate `@islamic-core/expo-adapter` into your first consumer app and verify FTS5 (`enableFTS: true`) plus iOS/Android Adhan playback on physical devices.
 
 **Definition of Done:** First consumer app installs, verifies, updates, and queries packs end-to-end with zero hardcoded content inside the app repository.
 
