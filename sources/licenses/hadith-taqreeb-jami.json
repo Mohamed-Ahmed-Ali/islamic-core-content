@@ -1,0 +1,21 @@
+{
+  "licenseSpdx": "LicenseRef-Taqreeb-Al-Sunnah-Unreviewed",
+  "packId": "hadith-taqreeb-jami",
+  "primaryPath": "hadith-taqreeb/01_jame3_al_usul_al_tisah.json",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Ṣāliḥ Aḥmad ash-Shāmī; Mashrūʿ Taqrīb as-Sunnah — supplied Android APK v3.0.4 Realm JSON export.",
+      "name": "Jāmiʿ al-Uṣūl — Ṣāliḥ Aḥmad ash-Shāmī",
+      "notice": "Exact local export pinned by SHA-256. The public URL identifies the work or project; it is not an export download or evidence of redistribution rights. Rights for the text, digital export, SQLite conversion, search projection, and redistribution remain unverified.",
+      "path": "hadith-taqreeb/01_jame3_al_usul_al_tisah.json",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://sunnahenc.com/about"
+      ],
+      "sourceUrl": "https://sunnahenc.com/about",
+      "sourceVersion": "android-apk-3.0.4-realm-export+sha256:6158e62d02556a7828a49938c090ec93d1874e2e0f3cb718e7413f066273a4fd"
+    }
+  ],
+  "status": "pending"
+}

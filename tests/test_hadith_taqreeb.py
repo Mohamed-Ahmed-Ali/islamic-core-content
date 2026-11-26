@@ -13,7 +13,9 @@ from pipelines.common.lock_inputs import (
     LockEntry,
     canonical_lock_json,
     parse_strict_json,
+    parse_and_validate_lock,
 )
+from pipelines.common.pack_sources import load_sqlite_source_metadata
 from pipelines.common.stage_taqreeb_inputs import TAQREEB_SOURCES
 from pipelines.common.taqreeb_search import (
     normalize_taqreeb_arabic,
@@ -408,3 +410,56 @@ def test_cli_argument_parsing(tmp_path: Path) -> None:
 
     # Build failure (already exists) -> exit 1
     assert main(["--pack-id", pack_id, "--sources-root", str(sources_root), "--output-dir", str(output_dir)]) == 1
+
+
+def test_taqreeb_pending_provenance(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parent.parent
+    lock_entries = parse_and_validate_lock(repo_root / "sources" / "manifest.lock.json")
+    entries_by_path = {e.path: e for e in lock_entries}
+
+    pack_suffixes = ["jami", "maalim", "wajeez", "kulliyyah"]
+    for suffix in pack_suffixes:
+        pack_id = f"hadith-taqreeb-{suffix}"
+        book_id, basename = TAQREEB_SOURCES[pack_id]
+        rel_path = f"hadith-taqreeb/{basename}"
+        assert rel_path in entries_by_path, f"Lock entry missing for {rel_path}"
+        entry = entries_by_path[rel_path]
+
+        lic_file = repo_root / "sources" / "licenses" / f"{pack_id}.json"
+        lic_data = parse_strict_json(lic_file.read_bytes().decode("utf-8"))
+
+        assert lic_data["status"] == "pending"
+        assert lic_data["reviewedBy"] is None
+        assert lic_data["licenseSpdx"] == "LicenseRef-Taqreeb-Al-Sunnah-Unreviewed"
+        assert lic_data["primaryPath"] == rel_path
+
+        metadata = load_sqlite_source_metadata(
+            repo_root,
+            pack_id,
+            (entry,),
+            primary_path=rel_path,
+            pack_version="0.4.0",
+        )
+        assert metadata["license_spdx"] == "LicenseRef-Taqreeb-Al-Sunnah-Unreviewed"
+        assert metadata["source_version"] == entry.source_version
+
+    # Mismatched source version using a temporary copy in tmp_path
+    tmp_sources = tmp_path / "modified_sources"
+    tmp_lic_dir = tmp_sources / "sources" / "licenses"
+    tmp_lic_dir.mkdir(parents=True)
+
+    test_pack = "hadith-taqreeb-jami"
+    test_entry = entries_by_path[f"hadith-taqreeb/{TAQREEB_SOURCES[test_pack][1]}"]
+    orig_lic = (repo_root / "sources" / "licenses" / f"{test_pack}.json").read_bytes().decode("utf-8")
+    mod_data = parse_strict_json(orig_lic)
+    mod_data["sources"][0]["sourceVersion"] = "wrong-version"
+    (tmp_lic_dir / f"{test_pack}.json").write_text(json.dumps(mod_data, indent=2), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="sourceVersion mismatch"):
+        load_sqlite_source_metadata(
+            tmp_sources,
+            test_pack,
+            (test_entry,),
+            primary_path=test_entry.path,
+            pack_version="0.4.0",
+        )

@@ -1,0 +1,21 @@
+{
+  "licenseSpdx": "LicenseRef-Taqreeb-Al-Sunnah-Unreviewed",
+  "packId": "hadith-taqreeb-maalim",
+  "primaryPath": "hadith-taqreeb/02_maalem_al_sunnah_al_nabawiyyah.json",
+  "reviewedBy": null,
+  "sources": [
+    {
+      "attribution": "Ṣāliḥ Aḥmad ash-Shāmī; Mashrūʿ Taqrīb as-Sunnah — supplied Android APK v3.0.4 Realm JSON export.",
+      "name": "Maʿālim as-Sunnah — Ṣāliḥ Aḥmad ash-Shāmī",
+      "notice": "Exact local export pinned by SHA-256. The public URL identifies the work or project; it is not an export download or evidence of redistribution rights. Rights for the text, digital export, SQLite conversion, search projection, and redistribution remain unverified.",
+      "path": "hadith-taqreeb/02_maalem_al_sunnah_al_nabawiyyah.json",
+      "permittedUses": [],
+      "rightsEvidence": [
+        "https://sunnahenc.com/about"
+      ],
+      "sourceUrl": "https://sunnahenc.com/about",
+      "sourceVersion": "android-apk-3.0.4-realm-export+sha256:8c114bb63c2f25f6bd214b55198b5c99e06d0f5217a1b62dc5882ccf3d0102e9"
+    }
+  ],
+  "status": "pending"
+}

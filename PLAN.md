@@ -279,7 +279,7 @@ Unless qualified, builder section references below point to `ARCHITECTURE.md`. I
 **Objective:** Deliver four local-only Arabic Taqrīb SQLite packs from four original Saleh al-Shami JSON exports.
 * [x] **Task 4.1 (Inventory, Audit, Staging & Lock):** Read-only inventory, audit, canonical staging, and lock.
 * [x] **Task 4.2 (Schema, Builder & Search):** Dedicated schema, deterministic builder, and search.
-* [ ] **Task 4.3 (Pending Provenance):** Pending provenance records in `sources/licenses/`.
+* [x] **Task 4.3 (Pending Provenance):** Pending provenance records in `sources/licenses/`.
 * [ ] **Task 4.4 (Local Gate & Reproducibility):** Local quality gate `--profile hadith-taqreeb-local` and bit-for-bit reproducibility proof.
 **Definition of Done:** Two independent offline builds in the pinned Linux runtime produce four bit-for-bit identical SQLite packs (`hadith-taqreeb-{jami,maalim,wajeez,kulliyyah}.db`). The `--profile hadith-taqreeb-local` gate verifies full schema invariants, PRAGMA integrity, external-content FTS5 token search, exact source row traversal, anomaly preservation, coverage metrics, and equal SHA-256 digests across candidate and rebuild roots without network access or published release artifacts.
 
