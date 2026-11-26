@@ -30,7 +30,7 @@
 
 ## 2. Repository Structure
 
-Code, schemas, lockfiles, license records, and release manifests live in Git. Never commit `Contant/`, `raw-inputs/`, `dist/`, `.db`, `.m4a` or `.caf` artifacts. Publish built packs only as release assets.
+Code, schemas, lockfiles, license records, and release manifests live in Git. Local inputs (`Contant/`, `raw-inputs/`), build output (`dist/`), workstation files, and database, archive, and audio packs are excluded by `.gitignore`. PR verification rejects tracked paths that match those rules. Publish built packs only as release assets after clearance.
 
 The tree shows the main interfaces, not every test or toolchain file; `PLAN.md` defines phase-local file scope.
 
@@ -87,6 +87,11 @@ islamic-core-content/
 │   ├── core-sdk/                       # TypeScript catalog parser & SHA-256 install contract
 │   └── expo-adapter/                   # (Phase 4) Optional Expo SQLite integration
 ├── Contant/                            # GITIGNORED local import only; never a builder path
+│   ├── adhan/                          # Original Adhan audio
+│   ├── audit/                          # Local verification records (not builder inputs)
+│   ├── hadith/                         # Upstream Hadith repositories and archives
+│   ├── qul/                            # wbw/, tafsir/, translation/, mushaf/, recitation/
+│   └── quran/                          # Tanzil exports, Corpus archive, and other Quran inputs
 ├── raw-inputs/                         # GITIGNORED local staging directory
 └── .github/workflows/
     ├── verify-pr.yml                   # Runs schema tests & quality gate on PRs

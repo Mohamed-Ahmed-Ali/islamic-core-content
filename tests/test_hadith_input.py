@@ -16,7 +16,7 @@ from pipelines.common.stage_hadith_inputs import (
     SOURCE_HASHES,
 )
 
-CONTENT_ROOT = Path(os.environ.get("CONTENT_ROOT", "C:/Users/moham/Downloads/islamic-core-content/Contant"))
+CONTENT_ROOT = Path(os.environ.get("CONTENT_ROOT", Path(__file__).resolve().parent.parent / "Contant"))
 
 _BASE_VALID_INPUT = {
     "books": [
@@ -302,7 +302,7 @@ def test_staging_narrator_only_and_body_formatting(tmp_path: Path) -> None:
     """Narrator-only -> englishFull=None; Narrator+body -> narrator\nbody."""
     # Create synthetic source JSON for bukhari-like book
     content_dir = tmp_path / "content"
-    book_file = content_dir / "hadith-json-main" / "hadith-json-main" / "db" / "by_book" / "the_9_books" / "bukhari.json"
+    book_file = content_dir / "hadith" / "hadith-json-main" / "hadith-json-main" / "db" / "by_book" / "the_9_books" / "bukhari.json"
     book_file.parent.mkdir(parents=True, exist_ok=True)
 
     source_data = {
@@ -359,7 +359,7 @@ def test_staging_narrator_only_and_body_formatting(tmp_path: Path) -> None:
 def test_nasai_chapter_remapping(tmp_path: Path) -> None:
     """Chapter 35.2 is remapped to 52 across chapters and hadith chapterId."""
     content_dir = tmp_path / "content"
-    book_file = content_dir / "hadith-json-main" / "hadith-json-main" / "db" / "by_book" / "the_9_books" / "nasai.json"
+    book_file = content_dir / "hadith" / "hadith-json-main" / "hadith-json-main" / "db" / "by_book" / "the_9_books" / "nasai.json"
     book_file.parent.mkdir(parents=True, exist_ok=True)
 
     # 51 regular chapters + 1 exceptional chapter 35.2
@@ -414,7 +414,7 @@ def test_nasai_chapter_remapping(tmp_path: Path) -> None:
 
 def test_staging_idempotency_and_no_overwrite(tmp_path: Path) -> None:
     content_dir = tmp_path / "content"
-    book_file = content_dir / "hadith-json-main" / "hadith-json-main" / "db" / "by_book" / "the_9_books" / "bukhari.json"
+    book_file = content_dir / "hadith" / "hadith-json-main" / "hadith-json-main" / "db" / "by_book" / "the_9_books" / "bukhari.json"
     book_file.parent.mkdir(parents=True, exist_ok=True)
     source_data = {
         "id": 1,

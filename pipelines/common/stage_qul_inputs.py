@@ -153,7 +153,7 @@ def stage_qul_file(
         raise ValueError("content_root and raw_root cannot contain each other")
 
     # Validate source hierarchy with exact case and no symlinks
-    src_path = (c_root / rel_path).absolute()
+    src_path = (c_root / "qul" / rel_path).absolute()
     _validate_path_hierarchy(src_path, must_exist=True)
     source_bytes = src_path.read_bytes()
 
@@ -328,7 +328,7 @@ def audit_all_wbw_inputs(raw_root: Path | str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stage QUL inputs and audit WBW alternate format")
-    parser.add_argument("--content-root", type=Path, required=True, help="Path to Contant directory")
+    parser.add_argument("--content-root", type=Path, required=True, help="Path to Contant directory containing qul/ subdirectory")
     parser.add_argument("--raw-root", type=Path, required=True, help="Path to raw-inputs directory")
     parser.add_argument("--registry", type=Path, default=Path("sources/registry.json"), help="Path to registry.json")
     parser.add_argument("--audit-wbw", action="store_true", help="Audit staged WBW SQLite vs JSON")

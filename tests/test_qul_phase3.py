@@ -38,7 +38,7 @@ def test_task_3_1_stage_qul_file_refuses_linked_raw_root_ancestor(tmp_path: Path
     raw_root = link / "raw-inputs"
     content_root = tmp_path / "Contant"
     rel_path = "wbw/english-wbw-translation.json.zip"
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)
@@ -67,7 +67,7 @@ def test_task_3_1_stage_qul_file_refuses_linked_content_root_ancestor(tmp_path: 
     content_root = link / "Contant"
     actual_contant = base / "Contant"
     rel_path = "wbw/english-wbw-translation.json.zip"
-    src_file = actual_contant / rel_path
+    src_file = actual_contant / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)
@@ -107,7 +107,7 @@ def test_task_3_1_stage_qul_file_refuses_wrong_case_raw_root(
     raw_root = tmp_path / target_rel_root
     content_root = tmp_path / "Contant"
     rel_path = "wbw/english-wbw-translation.json.zip"
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)
@@ -141,7 +141,7 @@ def test_task_3_1_stage_qul_file_refuses_case_collision_even_if_exact_name_exist
 
     content_root = tmp_path / "Contant"
     rel_path = "wbw/english-wbw-translation.json.zip"
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)
@@ -182,7 +182,7 @@ def test_task_3_1_stage_qul_file_refuses_wrong_case_intermediate_directory(tmp_p
     raw_root = tmp_path / "raw-inputs"
     rel_path = "wbw/english-wbw-translation.json.zip"
 
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)
@@ -208,7 +208,7 @@ def test_task_3_1_stage_qul_file_refuses_nonregular_zip_member(tmp_path: Path) -
     raw_root = tmp_path / "raw-inputs"
     rel_path = "wbw/english-wbw-translation.json.zip"
 
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Create zip archive with nonregular Unix symlink mode
@@ -236,7 +236,7 @@ def test_task_3_1_stage_qul_file_byte_preservation_and_idempotency(tmp_path: Pat
     raw_root = tmp_path / "raw-inputs"
     rel_path = "wbw/english-wbw-translation.json.zip"
 
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)
@@ -267,7 +267,7 @@ def test_task_3_1_stage_qul_file_refuses_nonidentical_destination(tmp_path: Path
     raw_root = tmp_path / "raw-inputs"
     rel_path = "wbw/english-wbw-translation.json.zip"
 
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)
@@ -291,7 +291,7 @@ def test_task_3_1_stage_qul_file_refuses_case_alias(tmp_path: Path) -> None:
     raw_root = tmp_path / "raw-inputs"
     rel_path = "wbw/english-wbw-translation.json.zip"
 
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)
@@ -315,7 +315,7 @@ def test_task_3_1_stage_qul_file_refuses_wrong_member_or_multiple_members(tmp_pa
     raw_root = tmp_path / "raw-inputs"
     rel_path = "wbw/english-wbw-translation.json.zip"
 
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Multiple members
@@ -353,7 +353,7 @@ def test_task_3_1_stage_qul_file_refuses_sha256_mismatch(tmp_path: Path) -> None
     raw_root = tmp_path / "raw-inputs"
     rel_path = "wbw/english-wbw-translation.json.zip"
 
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)
@@ -366,6 +366,56 @@ def test_task_3_1_stage_qul_file_refuses_sha256_mismatch(tmp_path: Path) -> None
             expected_sha256="0" * 64,
         )
 
+
+
+def test_task_3_1_stage_qul_file_refuses_wrong_case_source_qul_directory(tmp_path: Path) -> None:
+    content_root = tmp_path / "Contant"
+    raw_root = tmp_path / "raw-inputs"
+    rel_path = "wbw/english-wbw-translation.json.zip"
+
+    # Pre-create wrong-case 'QUL' directory in content_root
+    wrong_qul = content_root / "QUL" / "wbw"
+    wrong_qul.mkdir(parents=True, exist_ok=True)
+    src_file = wrong_qul / "english-wbw-translation.json.zip"
+    zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
+    src_file.write_bytes(zip_bytes)
+
+    with pytest.raises(ValueError, match="[Cc]ase"):
+        stage_qul_file(
+            content_root=content_root,
+            raw_root=raw_root,
+            rel_path=rel_path,
+            expected_sha256=hashlib.sha256(zip_bytes).hexdigest(),
+        )
+
+    assert not (raw_root / "qul" / rel_path).exists()
+
+
+def test_task_3_1_stage_qul_file_refuses_linked_source_qul_directory(tmp_path: Path) -> None:
+    content_root = tmp_path / "Contant"
+    content_root.mkdir(parents=True, exist_ok=True)
+    raw_root = tmp_path / "raw-inputs"
+    rel_path = "wbw/english-wbw-translation.json.zip"
+
+    target_dir = tmp_path / "other_qul"
+    (target_dir / "wbw").mkdir(parents=True, exist_ok=True)
+    src_file = target_dir / rel_path
+    zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
+    src_file.write_bytes(zip_bytes)
+
+    qul_link = content_root / "qul"
+    if not _try_symlink_dir(target_dir, qul_link):
+        pytest.skip("Symlink creation not permitted on this OS/user")
+
+    with pytest.raises(ValueError, match="[Ss]ymlink|[Jj]unction"):
+        stage_qul_file(
+            content_root=content_root,
+            raw_root=raw_root,
+            rel_path=rel_path,
+            expected_sha256=None,
+        )
+
+    assert not (raw_root / "qul" / rel_path).exists()
 
 
 def test_task_3_1_wbw_audit_rejects_sqlite_duplicate_key(tmp_path: Path) -> None:
@@ -1061,7 +1111,7 @@ def test_task_3_2_stage_qul_file_directory_creation_race_safe(
     raw_root = tmp_path / "raw-inputs"
     rel_path = "wbw/english-wbw-translation.json.zip"
 
-    src_file = content_root / rel_path
+    src_file = content_root / "qul" / rel_path
     src_file.parent.mkdir(parents=True, exist_ok=True)
     zip_bytes = _make_zip_bytes("english-wbw-translation.json", b'{"1:1:1": "test"}')
     src_file.write_bytes(zip_bytes)

@@ -1,6 +1,21 @@
-/Contant/
-/raw-inputs/
-/dist/
-*.db
-*.m4a
-*.caf
+# Local inputs, build outputs, and workstation state.
+/[Cc][Oo][Nn][Tt][Aa][Nn][Tt]/
+/[Rr][Aa][Ww]-[Ii][Nn][Pp][Uu][Tt][Ss]/
+/[Dd][Ii][Ss][Tt]/
+.omp/
+[Aa][Gg][Ee][Nn][Tt][Ss].[Mm][Dd]
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# Data packs and SQLite sidecars (including case variants).
+*.[Dd][Bb]
+*.[Dd][Bb]-*
+*.[Ss][Qq][Ll][Ii][Tt][Ee]
+*.[Ss][Qq][Ll][Ii][Tt][Ee]3
+*.[Ss][Qq][Ll][Ii][Tt][Ee]-*
+*.[Ss][Qq][Ll][Ii][Tt][Ee]3-*
+*.[Zz][Ii][Pp]
+*.[Mm][Pp]3
+*.[Mm]4[Aa]
+*.[Cc][Aa][Ff]

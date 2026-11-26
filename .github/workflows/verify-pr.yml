@@ -16,6 +16,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Reject tracked local inputs and generated packs
+        shell: bash
+        run: |
+          set -euo pipefail
+          tracked_ignored="$(git ls-files -ci --exclude-per-directory=.gitignore)"
+          if [[ -n "$tracked_ignored" ]]; then
+            printf 'Ignored paths are tracked:\n%s\n' "$tracked_ignored" >&2
+            exit 1
+          fi
+
       - name: Exact-path proofs (tracked files)
         shell: bash
         run: |

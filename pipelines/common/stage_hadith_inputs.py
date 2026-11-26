@@ -69,6 +69,7 @@ def _resolve_source_path(content_root: Path, slug: str) -> Path:
     if slug == "ahmad":
         return (
             content_root
+            / "hadith"
             / "Open-Hadith-Data-master"
             / "Open-Hadith-Data-master"
             / "Musnad_Ahmad_Ibn-Hanbal"
@@ -76,6 +77,7 @@ def _resolve_source_path(content_root: Path, slug: str) -> Path:
         )
     return (
         content_root
+        / "hadith"
         / "hadith-json-main"
         / "hadith-json-main"
         / "db"
@@ -362,7 +364,12 @@ def stage_hadith_book(
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Stage canonical Hadith input JSON")
-    parser.add_argument("--content-root", type=Path, required=True, help="Path to Contant directory")
+    parser.add_argument(
+        "--content-root",
+        type=Path,
+        required=True,
+        help="Path to top-level Contant directory containing hadith/ subdirectory",
+    )
     parser.add_argument("--raw-root", type=Path, required=True, help="Path to raw-inputs directory")
     parser.add_argument("--book", type=str, required=True, help="Book slug")
     args = parser.parse_args(argv)

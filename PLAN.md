@@ -25,7 +25,9 @@
 
 ## 2. Raw Input Staging Guide (For Your Ongoing Collection)
 
-Only the paths below are builder inputs. A clean checkout contains neither `Contant/` nor `raw-inputs/`. For local staging, copy exactly the nine listed Tanzil XML basenames from flat `Contant/` to `raw-inputs/tanzil/` without renaming (`Contant/tanzil/` is not a source path). Copy `Contant/quranic-corpus-morphology-0.4.zip` to `raw-inputs/corpus/` unchanged; use only its `quranic-corpus-morphology-0.4.txt` member, not the loose extraction. For QUL inputs, stage byte-for-byte from direct subfolders under `Contant/` (`wbw/`, `tafsir/`, `translation/`, `mushaf/`, `recitation/`) to `raw-inputs/qul/` retaining relative directory structure and archive basenames. Do not glob, use other exports, or commit raw data.
+Only the paths below are builder inputs. A clean checkout contains neither `Contant/` nor `raw-inputs/`. For local staging, copy exactly the nine listed Tanzil XML basenames from `Contant/quran/` to `raw-inputs/tanzil/` without renaming. Copy `Contant/quran/quranic-corpus-morphology-0.4.zip` to `raw-inputs/corpus/` unchanged; use only its `quranic-corpus-morphology-0.4.txt` member, not the loose extraction. For QUL inputs, stage byte-for-byte from `Contant/qul/{wbw,tafsir,translation,mushaf,recitation}/` to `raw-inputs/qul/`, retaining relative directory structure and archive basenames. Do not glob, use other exports, or commit raw data.
+
+For Phase 2, run `python -B -m pipelines.common.stage_hadith_inputs --content-root Contant --raw-root raw-inputs --book <slug>` for each book. This reads the selected JSON or CSV from the upstream trees under `Contant/hadith/`. `Contant/audit/malik_fill_verification.json` is a local audit record, not an input.
 
 For Phase 3, run `python -B -m pipelines.common.stage_qul_inputs --content-root Contant --raw-root raw-inputs --audit-wbw` from the repository root, then verify the complete lock with `python -B -m pipelines.common.lock_inputs --registry sources/registry.json --raw-root raw-inputs --output sources/manifest.lock.json --verify`. The SQLite WBW archives are audited against their JSON equivalents; only the JSON formats supply WBW builder rows.
 
@@ -83,7 +85,7 @@ raw-inputs/
         └── ayah-recitation-mohamed-al-tablawi-recitation-murattal-hafs-73.json.zip
 ```
 
-Copy each exact filename below from `Contant/Adhan/` to `raw-inputs/audio/adhan/{slug}.mp3`. The same stable slug identifies both outputs.
+Copy each exact filename below from `Contant/adhan/` to `raw-inputs/audio/adhan/{slug}.mp3`. The same stable slug identifies both outputs.
 
 | Exact local basename | Stable slug |
 | --- | --- |
