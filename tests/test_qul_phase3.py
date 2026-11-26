@@ -1787,3 +1787,489 @@ def test_task_3_5_mushaf_pack_writer_and_schema(tmp_path: Path) -> None:
         assert cur.fetchall() == []
     finally:
         con.close()
+
+
+# ---------------------------------------------------------------------------
+# Task 3.6 Tests: Recitation Timing Manifests and Narrow Decimal Decoding
+# ---------------------------------------------------------------------------
+
+def test_task_3_6_lock_inputs_parse_strict_json_decimal_mode() -> None:
+    from decimal import Decimal
+    from pipelines.common.lock_inputs import parse_strict_json
+
+    json_text = '{"duration": 12.5, "count": 10}'
+
+    # Default behavior: rejects float/decimal tokens strictly
+    with pytest.raises(ValueError, match="Floating point token"):
+        parse_strict_json(json_text)
+
+    # allow_decimal=True: parses decimal token as Decimal
+    res_dec = parse_strict_json(json_text, allow_decimal=True)
+    assert isinstance(res_dec["duration"], Decimal)
+    assert res_dec["duration"] == Decimal("12.5")
+    assert res_dec["count"] == 10
+    assert isinstance(res_dec["count"], int)
+
+
+def test_task_3_6_duration_half_up_rounding() -> None:
+    from decimal import Decimal
+    from pipelines.builders.build_recitation_manifests import duration_seconds_to_reported_ms
+
+    # Null duration
+    assert duration_seconds_to_reported_ms(None) is None
+
+    # Exact whole seconds
+    assert duration_seconds_to_reported_ms(Decimal("6.0")) == 6000
+    assert duration_seconds_to_reported_ms(Decimal("71.0")) == 71000
+    assert duration_seconds_to_reported_ms(0) == 0
+
+    # Half-up rounding tests
+    assert duration_seconds_to_reported_ms(Decimal("1.0004")) == 1000
+    assert duration_seconds_to_reported_ms(Decimal("1.0005")) == 1001
+    assert duration_seconds_to_reported_ms(Decimal("1.0006")) == 1001
+    assert duration_seconds_to_reported_ms(Decimal("0.0005")) == 1
+    assert duration_seconds_to_reported_ms(Decimal("0.0004")) == 0
+
+    # Rejection of invalid types and values
+    with pytest.raises(ValueError, match="float"):
+        duration_seconds_to_reported_ms(1.5)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="bool"):
+        duration_seconds_to_reported_ms(True)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="negative"):
+        duration_seconds_to_reported_ms(Decimal("-1.0"))
+    with pytest.raises(ValueError, match="negative"):
+        duration_seconds_to_reported_ms(-10)
+
+
+def test_task_3_6_manifest_schema_and_canonical_byte_dump(tmp_path: Path) -> None:
+    import json
+    from jsonschema import Draft202012Validator
+    from pipelines.builders.build_recitation_manifests import (
+        RECITATION_PACKS,
+        render_recitation_manifest,
+        build_recitation_manifests,
+    )
+
+    repo_root = Path(__file__).resolve().parents[1]
+    schema_path = repo_root / "specs" / "recitation-manifest.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    validator = Draft202012Validator(schema)
+
+    # Test RECITATION_PACKS inventory
+    assert len(RECITATION_PACKS) == 7
+    expected_pack_ids = {
+        "audio-recitation-abdul-basit-mujawwad",
+        "audio-recitation-abdul-basit-murattal",
+        "audio-recitation-al-husary-muallim",
+        "audio-recitation-al-husary-mujawwad",
+        "audio-recitation-al-husary-murattal",
+        "audio-recitation-al-minshawi-murattal",
+        "audio-recitation-al-tablawi-murattal",
+    }
+    assert set(RECITATION_PACKS.keys()) == expected_pack_ids
+
+    from decimal import Decimal
+    from pipelines.common.lock_inputs import author_lock
+    from pipelines.common.tanzil_coordinates import load_tanzil_coordinates
+    from tests.fixtures.tanzil import build_synthetic_metadata_xml
+
+    sources_root = tmp_path / "repo"
+    raw_root = sources_root / "raw-inputs"
+    sources_dir = sources_root / "sources"
+    specs_dir = sources_root / "specs"
+    licenses_dir = sources_dir / "licenses"
+
+    specs_dir.mkdir(parents=True)
+    licenses_dir.mkdir(parents=True)
+    (raw_root / "tanzil").mkdir(parents=True)
+    (raw_root / "qul" / "recitation").mkdir(parents=True)
+
+    # Copy schema into synthetic specs_dir
+    (specs_dir / "recitation-manifest.schema.json").write_bytes(schema_path.read_bytes())
+
+    # Locate or generate canonical Tanzil metadata XML
+    tanzil_path = raw_root / "tanzil" / "quran-data-Tanzil.xml"
+    tanzil_bytes = None
+    for cand in [
+        repo_root / "raw-inputs" / "tanzil" / "quran-data-Tanzil.xml",
+        Path("/repo/raw-inputs/tanzil/quran-data-Tanzil.xml"),
+        Path("C:/Users/moham/Downloads/islamic-core-content/raw-inputs/tanzil/quran-data-Tanzil.xml"),
+    ]:
+        if cand.is_file():
+            tanzil_bytes = cand.read_bytes()
+            break
+
+    if tanzil_bytes is not None:
+        tanzil_path.write_bytes(tanzil_bytes)
+    else:
+        canonical_counts = (
+            7, 286, 200, 176, 120, 165, 206, 75, 129, 109, 123, 111, 43, 52, 99, 128, 111, 110, 98, 135,
+            112, 78, 118, 64, 77, 227, 93, 88, 69, 60, 34, 30, 73, 54, 45, 83, 182, 88, 75, 85,
+            54, 53, 89, 59, 37, 35, 38, 29, 18, 45, 60, 49, 62, 55, 78, 96, 29, 22, 24, 13,
+            14, 11, 11, 18, 12, 12, 30, 52, 52, 44, 28, 28, 20, 56, 40, 31, 50, 40, 46, 42,
+            29, 19, 36, 25, 22, 17, 19, 26, 30, 20, 15, 21, 11, 8, 8, 19, 5, 8, 8, 11,
+            11, 8, 3, 9, 5, 4, 7, 3, 6, 3, 5, 4, 5, 6
+        )
+        canonical_starts = []
+        acc = 0
+        for c in canonical_counts:
+            canonical_starts.append(acc)
+            acc += c
+        def _cid(gid: int) -> tuple[int, int]:
+            for idx, (s, cnt) in enumerate(zip(canonical_starts, canonical_counts), start=1):
+                if s < gid <= s + cnt:
+                    return idx, gid - s
+            raise ValueError(f"Out of range: {gid}")
+        import tests.fixtures.tanzil as tf
+        o_fn, o_cnt, o_st = tf.global_id_to_sura_aya, tf.SURAH_AYAH_COUNTS, tf.SURAH_STARTS
+        try:
+            tf.global_id_to_sura_aya = _cid
+            tf.SURAH_AYAH_COUNTS = canonical_counts
+            tf.SURAH_STARTS = canonical_starts
+            tanzil_xml = build_synthetic_metadata_xml(surah_counts=canonical_counts)
+        finally:
+            tf.global_id_to_sura_aya, tf.SURAH_AYAH_COUNTS, tf.SURAH_STARTS = o_fn, o_cnt, o_st
+        tanzil_path.write_text(tanzil_xml, encoding="utf-8")
+
+    coords = load_tanzil_coordinates(tanzil_path)
+    assert len(coords.ayah_ids) == 6236
+
+    reg_data: dict[str, Any] = {
+        "tanzil/quran-data-Tanzil.xml": {
+            "packIds": sorted(expected_pack_ids),
+            "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+            "sourceVersion": "1.0",
+        }
+    }
+
+    # Build synthetic recitation data for all 7 packs
+    from pipelines.builders.build_recitation_manifests import TABLAWI_KNOWN_INVALID_SEGMENTS
+    tablawi_invalid_map = {(vk, idx): list(seg) for vk, idx, seg in TABLAWI_KNOWN_INVALID_SEGMENTS}
+
+    for pack_id, pack_info in RECITATION_PACKS.items():
+        ayah_data: dict[str, Any] = {}
+        is_tablawi = (pack_id == "audio-recitation-al-tablawi-murattal")
+        for vk in coords.ayah_ids:
+            s, a = map(int, vk.split(":"))
+            dur: Any = Decimal("6.0") if is_tablawi else None
+            if is_tablawi:
+                diag_for_vk = {d_idx: d_seg for (d_vk, d_idx), d_seg in tablawi_invalid_map.items() if d_vk == vk}
+                if diag_for_vk:
+                    max_idx = max(diag_for_vk.keys())
+                    segs = []
+                    for idx in range(1, max_idx + 1):
+                        if idx in diag_for_vk:
+                            segs.append(list(diag_for_vk[idx]))
+                        else:
+                            segs.append([idx, (idx - 1) * 100, idx * 100])
+                else:
+                    segs = [[1, 0, 500]]
+            else:
+                segs = [[1, 0, 500]]
+            ayah_data[vk] = {
+                "surah_number": s,
+                "ayah_number": a,
+                "audio_url": f"{pack_info['https_prefix']}/{s:03d}{a:03d}.mp3",
+                "duration": dur,
+                "segments": segs,
+            }
+
+        zip_bytes = _make_zip_bytes(pack_info["member_name"], json.dumps(ayah_data, default=float).encode("utf-8"))
+        (raw_root / pack_info["archive_path"]).write_bytes(zip_bytes)
+        archive_sha = hashlib.sha256(zip_bytes).hexdigest()
+
+        reg_data[pack_info["archive_path"]] = {
+            "packIds": [pack_id],
+            "sourceUrl": f"https://example.com/recitation/{pack_id}",
+            "sourceVersion": f"sha256:{archive_sha}",
+        }
+
+        lic_data = {
+            "packId": pack_id,
+            "licenseSpdx": "LicenseRef-QUL-Unreviewed",
+            "primaryPath": pack_info["archive_path"],
+            "status": "pending",
+            "reviewedBy": None,
+            "sources": [
+                {
+                    "attribution": "Tarteel",
+                    "name": f"Recitation — {pack_info['reciter']}",
+                    "notice": "Notice",
+                    "path": pack_info["archive_path"],
+                    "permittedUses": [],
+                    "rightsEvidence": ["https://example.com"],
+                    "sourceUrl": f"https://example.com/recitation/{pack_id}",
+                    "sourceVersion": f"sha256:{archive_sha}",
+                },
+                {
+                    "attribution": "Tanzil Project",
+                    "name": "Tanzil Quran Metadata",
+                    "notice": "Notice",
+                    "path": "tanzil/quran-data-Tanzil.xml",
+                    "permittedUses": [],
+                    "rightsEvidence": ["https://example.com"],
+                    "sourceUrl": "https://tanzil.net/res/text/metadata/quran-data.xml",
+                    "sourceVersion": "1.0",
+                },
+            ],
+        }
+        (licenses_dir / f"{pack_id}.json").write_text(
+            json.dumps(lic_data, sort_keys=True, indent=2), encoding="utf-8"
+        )
+
+    # Write registry and author lock
+    (sources_dir / "registry.json").write_text(
+        json.dumps(reg_data, sort_keys=True, indent=2), encoding="utf-8"
+    )
+    author_lock(sources_dir / "registry.json", raw_root, sources_dir / "manifest.lock.json")
+
+    # Test render_recitation_manifest for Abdul Basit Mujawwad and Al-Tablawi Murattal
+    m_abdul_basit = render_recitation_manifest(sources_root, "audio-recitation-abdul-basit-mujawwad")
+    assert m_abdul_basit.endswith(b"\n")
+    obj_ab = json.loads(m_abdul_basit.decode("utf-8"))
+    validator.validate(obj_ab)
+    assert obj_ab["packId"] == "audio-recitation-abdul-basit-mujawwad"
+    assert obj_ab["style"] == "mujawwad"
+    assert obj_ab["reciter"] == "Abdul Basit Abdul Samad"
+    assert obj_ab["ayahs"][0]["reportedDurationMs"] is None
+    assert obj_ab["ayahs"][0]["invalidSourceSegments"] == []
+
+    m_tablawi = render_recitation_manifest(sources_root, "audio-recitation-al-tablawi-murattal")
+    assert m_tablawi.endswith(b"\n")
+    obj_tab = json.loads(m_tablawi.decode("utf-8"))
+    validator.validate(obj_tab)
+    assert obj_tab["packId"] == "audio-recitation-al-tablawi-murattal"
+    assert obj_tab["style"] == "murattal"
+    assert obj_tab["reciter"] == "Mohamed Al-Tablawi"
+    assert obj_tab["ayahs"][0]["reportedDurationMs"] == 6000
+
+    # Test build_recitation_manifests to output directory
+    out_dir = tmp_path / "output_manifests"
+    out_dir.mkdir()
+
+    # Pre-existing file check: should refuse
+    clash_file = out_dir / "audio-recitation-abdul-basit-mujawwad.json"
+    clash_file.write_text("existing", encoding="utf-8")
+    with pytest.raises(FileExistsError, match="already exists"):
+        build_recitation_manifests(sources_root, out_dir)
+
+    # Remove clash file and test dangling symlink refusal
+    clash_file.unlink()
+    dangling_link = out_dir / "audio-recitation-al-husary-muallim.json"
+    try:
+        dangling_link.symlink_to(out_dir / "nonexistent_target.json")
+    except (OSError, NotImplementedError):
+        pass
+    else:
+        with pytest.raises(FileExistsError, match="already exists or is a symlink"):
+            build_recitation_manifests(sources_root, out_dir)
+        dangling_link.unlink()
+    # Test output directory itself being a symlink
+    symlink_out = tmp_path / "symlink_output"
+    try:
+        symlink_out.symlink_to(out_dir, target_is_directory=True)
+    except (OSError, NotImplementedError):
+        pass
+    else:
+        with pytest.raises(ValueError, match="Output directory cannot be a symlink or junction"):
+            build_recitation_manifests(sources_root, symlink_out)
+
+
+    # Build manifests cleanly
+    written_paths = build_recitation_manifests(sources_root, out_dir)
+    assert len(written_paths) == 7
+    for p in written_paths:
+        assert p.is_file()
+        raw_content = p.read_bytes()
+        assert raw_content.endswith(b"\n")
+        parsed = json.loads(raw_content.decode("utf-8"))
+        validator.validate(parsed)
+
+    # Test moved/unlocked archive path or license primaryPath mismatch
+    lic_ab_path = licenses_dir / "audio-recitation-abdul-basit-mujawwad.json"
+    lic_ab_orig = lic_ab_path.read_text(encoding="utf-8")
+    lic_ab_bad = json.loads(lic_ab_orig)
+    lic_ab_bad["primaryPath"] = "qul/recitation/wrong_archive.json.zip"
+    lic_ab_path.write_text(json.dumps(lic_ab_bad), encoding="utf-8")
+    with pytest.raises(ValueError, match="primaryPath mismatch"):
+        render_recitation_manifest(sources_root, "audio-recitation-abdul-basit-mujawwad")
+    lic_ab_path.write_text(lic_ab_orig, encoding="utf-8")
+
+    # Test sourceVersion mismatch in license
+    lic_ab_bad = json.loads(lic_ab_orig)
+    lic_ab_bad["sources"][0]["sourceVersion"] = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    lic_ab_path.write_text(json.dumps(lic_ab_bad), encoding="utf-8")
+    with pytest.raises(ValueError, match="sourceVersion mismatch"):
+        render_recitation_manifest(sources_root, "audio-recitation-abdul-basit-mujawwad")
+    lic_ab_path.write_text(lic_ab_orig, encoding="utf-8")
+
+    # Test moved/unlocked archive path (lock entries mismatch)
+    extra_zip = raw_root / "qul" / "recitation" / "extra.zip"
+    extra_zip.write_bytes(b"dummy")
+    reg_bad = dict(reg_data)
+    reg_bad["qul/recitation/extra.zip"] = {
+        "packIds": ["audio-recitation-abdul-basit-mujawwad"],
+        "sourceUrl": "https://example.com/extra",
+        "sourceVersion": "sha256:" + hashlib.sha256(b"dummy").hexdigest(),
+    }
+    (sources_dir / "registry.json").write_text(json.dumps(reg_bad, sort_keys=True, indent=2), encoding="utf-8")
+    author_lock(sources_dir / "registry.json", raw_root, sources_dir / "manifest.lock.json")
+    with pytest.raises(ValueError, match="Lock entries mismatch"):
+        render_recitation_manifest(sources_root, "audio-recitation-abdul-basit-mujawwad")
+    extra_zip.unlink()
+    (sources_dir / "registry.json").write_text(json.dumps(reg_data, sort_keys=True, indent=2), encoding="utf-8")
+    author_lock(sources_dir / "registry.json", raw_root, sources_dir / "manifest.lock.json")
+
+def test_task_3_6_tablawi_exact_reversed_intervals_and_reconstruction(tmp_path: Path) -> None:
+    from pipelines.builders.build_recitation_manifests import process_ayah_segments
+
+    # Test 2:164 segment with ordinal 22 having reversed timestamps [22, 39140, 39130] at sourceIndex 22
+    raw_2_164_segments = (
+        [[i, (i - 1) * 100, i * 100] for i in range(1, 22)]
+        + [[22, 39140, 39130]]  # 22nd item: reversed interval!
+        + [[23, 39140, 42840]]
+    )
+
+    # For Al-Tablawi, the known diagnostic is tolerated and partitioned
+    valid_segs, invalid_segs = process_ayah_segments(
+        "2:164",
+        raw_2_164_segments,
+        pack_id="audio-recitation-al-tablawi-murattal",
+    )
+    assert len(valid_segs) == 22
+    assert valid_segs[-1] == [23, 39140, 42840]
+    assert invalid_segs == [{"sourceIndex": 22, "segment": [22, 39140, 39130]}]
+
+    # Verify source reconstruction by placing diagnostics back at their 1-based sourceIndex
+    reconstructed = []
+    inv_by_idx = {item["sourceIndex"]: item["segment"] for item in invalid_segs}
+    valid_iter = iter(valid_segs)
+    for i in range(1, len(raw_2_164_segments) + 1):
+        if i in inv_by_idx:
+            reconstructed.append(inv_by_idx[i])
+        else:
+            reconstructed.append(next(valid_iter))
+    assert reconstructed == raw_2_164_segments
+
+    # For any other edition, the exact same reversed interval MUST be rejected
+    with pytest.raises(ValueError, match="Invalid timing interval"):
+        process_ayah_segments(
+            "2:164",
+            raw_2_164_segments,
+            pack_id="audio-recitation-abdul-basit-mujawwad",
+        )
+
+    # For Tablawi, an unexpected reversed interval outside the allowlist MUST be rejected
+    bad_tablawi_segments = [[1, 1000, 500]]
+    with pytest.raises(ValueError, match="Unexpected invalid timing interval"):
+        process_ayah_segments(
+            "2:164",
+            bad_tablawi_segments,
+            pack_id="audio-recitation-al-tablawi-murattal",
+        )
+
+
+def test_task_3_6_rejected_malformed_timings_and_wrong_urls() -> None:
+    from pipelines.builders.build_recitation_manifests import (
+        process_ayah_segments,
+        validate_audio_url,
+        validate_ayah_record,
+    )
+
+    # Negative start timing
+    with pytest.raises(ValueError, match="negative"):
+        process_ayah_segments("1:1", [[1, -10, 100]], pack_id="audio-recitation-abdul-basit-murattal")
+
+    # Negative end timing
+    with pytest.raises(ValueError, match="negative"):
+        process_ayah_segments("1:1", [[1, 0, -5]], pack_id="audio-recitation-abdul-basit-murattal")
+
+    # Boolean timing
+    with pytest.raises(ValueError, match="integer"):
+        process_ayah_segments("1:1", [[True, 0, 100]], pack_id="audio-recitation-abdul-basit-murattal")
+    with pytest.raises(ValueError, match="integer"):
+        process_ayah_segments("1:1", [[1, False, 100]], pack_id="audio-recitation-abdul-basit-murattal")
+
+    # Float timing
+    with pytest.raises(ValueError, match="integer"):
+        process_ayah_segments("1:1", [[1, 10.5, 100]], pack_id="audio-recitation-abdul-basit-murattal")
+
+    # Malformed tuple shape (length != 3)
+    with pytest.raises(ValueError, match="3 elements"):
+        process_ayah_segments("1:1", [[1, 100]], pack_id="audio-recitation-abdul-basit-murattal")
+
+    # Invalid word position (pos <= 0)
+    with pytest.raises(ValueError, match="positive"):
+        process_ayah_segments("1:1", [[0, 0, 100]], pack_id="audio-recitation-abdul-basit-murattal")
+
+    # Empty segments list
+    with pytest.raises(ValueError, match="cannot be empty"):
+        process_ayah_segments("1:1", [], pack_id="audio-recitation-abdul-basit-murattal")
+
+    # URL validation: wrong prefix for pack
+    with pytest.raises(ValueError, match="URL prefix"):
+        validate_audio_url(
+            "https://wrong-domain.com/001001.mp3",
+            "audio-recitation-abdul-basit-mujawwad",
+            1,
+            1,
+        )
+
+    # URL validation: wrong ayah number in URL
+    with pytest.raises(ValueError, match="filename"):
+        validate_audio_url(
+            "https://audio-cdn.tarteel.ai/quran/abdulBasitMujawwad/001002.mp3",
+            "audio-recitation-abdul-basit-mujawwad",
+            1,
+            1,
+        )
+
+    # Ayah record validation: missing required fields
+    base_ayah_data = {
+        "surah_number": 1,
+        "ayah_number": 1,
+        "audio_url": "https://audio-cdn.tarteel.ai/quran/abdulBasitMujawwad/001001.mp3",
+        "duration": None,
+        "segments": [[1, 0, 500]],
+    }
+
+    # Non-dict record
+    with pytest.raises(ValueError, match="must be a dictionary"):
+        validate_ayah_record("invalid", "1:1", "audio-recitation-abdul-basit-mujawwad")
+
+    # Missing duration
+    missing_dur = dict(base_ayah_data)
+    del missing_dur["duration"]
+    with pytest.raises(ValueError, match="fields mismatch"):
+        validate_ayah_record(missing_dur, "1:1", "audio-recitation-abdul-basit-mujawwad")
+
+    # Missing segments
+    missing_segs = dict(base_ayah_data)
+    del missing_segs["segments"]
+    with pytest.raises(ValueError, match="fields mismatch"):
+        validate_ayah_record(missing_segs, "1:1", "audio-recitation-abdul-basit-mujawwad")
+
+    # Extra field in record
+    extra_field = dict(base_ayah_data, unexpected=123)
+    with pytest.raises(ValueError, match="fields mismatch"):
+        validate_ayah_record(extra_field, "1:1", "audio-recitation-abdul-basit-mujawwad")
+
+    # Boolean surah_number
+    bool_surah = dict(base_ayah_data, surah_number=True)
+    with pytest.raises(ValueError, match="must be integers"):
+        validate_ayah_record(bool_surah, "1:1", "audio-recitation-abdul-basit-mujawwad")
+
+    # Boolean ayah_number
+    bool_ayah = dict(base_ayah_data, ayah_number=False)
+    with pytest.raises(ValueError, match="must be integers"):
+        validate_ayah_record(bool_ayah, "1:1", "audio-recitation-abdul-basit-mujawwad")
+
+    # Boolean duration
+    bool_dur = dict(base_ayah_data, duration=True)
+    with pytest.raises(ValueError, match="bool"):
+        validate_ayah_record(bool_dur, "1:1", "audio-recitation-abdul-basit-mujawwad")
+
+    # Coordinate mismatch with verse_key
+    wrong_coord = dict(base_ayah_data, ayah_number=2)
+    with pytest.raises(ValueError, match="Surah/ayah number mismatch"):
+        validate_ayah_record(wrong_coord, "1:1", "audio-recitation-abdul-basit-mujawwad")

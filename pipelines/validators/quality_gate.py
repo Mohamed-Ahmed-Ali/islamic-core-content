@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import closing
 from datetime import datetime, timezone
 from fractions import Fraction
 import hashlib
@@ -41,14 +42,20 @@ from pipelines.release.release_packs import MORPHOLOGY_SOURCE_ARCHIVE_MEMBERS, l
 from pipelines.toolchain.check_runtime import verify_runtime
 from pipelines.common.pack_sources import load_sqlite_source_metadata
 
-
-class GateCheckError(Exception):
-    def __init__(self, check_num: int, asset: str, reason: str) -> None:
-        super().__init__(f"Check #{check_num} failed on {asset}: {reason}")
-        self.check_num = check_num
-        self.asset = asset
-        self.reason = reason
-
+from pipelines.validators.phase3_local import (
+    GateCheckError,
+    PHASE3_ALL_PACKS,
+    PHASE3_DB_PACKS,
+    PHASE3_EXPECTED_ARTIFACTS,
+    PHASE3_RECITATION_PACKS,
+    build_phase3_reference_db,
+    run_phase3_fts_smoke,
+    scan_phase3_inventory,
+    verify_db_content_against_reference,
+    verify_phase3_acceptance_controls,
+    verify_phase3_root_identity,
+    verify_phase3_source_lock_and_clearance,
+)
 
 _STAGES: list[tuple[str, int]] = [
     ("Check 0 (preflight)", 0),
@@ -160,6 +167,15 @@ _PACK_SCHEMA_MAP: dict[str, str] = {
     "quran-morphology": "quran_morphology.v1.sql",
     "quran-wbw-en": "quran_wbw.v1.sql",
     "hadith-fixture": "hadith_book.v1.sql",
+    "quran-tafsir-ar-ibn-kathir": "quran_tafsir.v1.sql",
+    "quran-tafsir-ar-tabari": "quran_tafsir.v1.sql",
+    "quran-tafsir-ar-qurtubi": "quran_tafsir.v1.sql",
+    "quran-tafsir-ar-wasit": "quran_tafsir.v1.sql",
+    "quran-tafsir-ar-razi": "quran_tafsir.v1.sql",
+    "quran-tafsir-en-ibn-kathir": "quran_tafsir.v1.sql",
+    "quran-tr-en-sahih": "quran_translation_sahih.v1.sql",
+    "quran-mushaf-madani-v2": "quran_mushaf.v1.sql",
+    "quran-mushaf-indopak-15": "quran_mushaf.v1.sql",
 }
 
 _PACK_FTS_MAP: dict[str, tuple[str, ...]] = {
@@ -172,6 +188,15 @@ _PACK_FTS_MAP: dict[str, tuple[str, ...]] = {
     "quran-morphology": (),
     "quran-wbw-en": ("word_translations_fts",),
     "hadith-fixture": ("hadiths_fts", "hadiths_full_fts"),
+    "quran-tafsir-ar-ibn-kathir": ("tafsir_fts",),
+    "quran-tafsir-ar-tabari": ("tafsir_fts",),
+    "quran-tafsir-ar-qurtubi": ("tafsir_fts",),
+    "quran-tafsir-ar-wasit": ("tafsir_fts",),
+    "quran-tafsir-ar-razi": ("tafsir_fts",),
+    "quran-tafsir-en-ibn-kathir": ("tafsir_fts",),
+    "quran-tr-en-sahih": ("translations_fts",),
+    "quran-mushaf-madani-v2": (),
+    "quran-mushaf-indopak-15": (),
 }
 
 _ARABIC_CHAR_RE = re.compile(r"[\u0600-\u06FF]")
@@ -622,6 +647,8 @@ class GateContext:
         self.locked_inputs: dict[str, Any] = {}
         self._tanzil_coords = None
         self._corpus_segments = None
+        self.phase3_ref_dir: tempfile.TemporaryDirectory[str] | None = None
+        self.phase3_ref_dbs: dict[str, Path] = {}
 
     def get_tanzil_coordinates(self) -> Any:
         if self._tanzil_coords is None:
@@ -635,15 +662,19 @@ class GateContext:
             self._corpus_segments = read_corpus_segments(corpus_zip, coords.ayah_ids)
         return self._corpus_segments
 
-def _fail(stage_idx: int, check_num: int, asset: str, reason: str) -> None:
-    stage_name = _STAGES[stage_idx][0]
+def _fail(stage_idx: int, check_num: int, asset: str, reason: str, profile: str = "") -> None:
+    stage_default = _STAGES[stage_idx][1]
+    if profile == "phase3-local" and check_num != stage_default:
+        stage_name = f"Check #{check_num}"
+    else:
+        stage_name = _STAGES[stage_idx][0]
     blocked = [s[0] for s in _STAGES[stage_idx + 1 :]]
     blocked_str = ", ".join(blocked) if blocked else "none"
     sys.stderr.write(f"{stage_name} failed on {asset}: {reason}\n")
     sys.stderr.write(f"Blocked stages: {blocked_str}\n")
-    sys.stderr.write("Check 8: Not applicable (no production QAC/QUL pair).\n")
+    if check_num != 8 and profile != "phase3-local":
+        sys.stderr.write("Check 8: Not applicable (no production QAC/QUL pair).\n")
     sys.exit(1)
-
 
 def load_locked_json(ctx: GateContext, rel_path: str) -> Any:
     if rel_path in ctx.locked_inputs:
@@ -750,10 +781,29 @@ def stage_1_root_identity(ctx: GateContext) -> None:
         raise GateCheckError(6, "roots", "symlink or junction not permitted for candidate or rebuild roots")
     if not ctx.candidate.is_dir() or not ctx.rebuild.is_dir():
         raise GateCheckError(6, "roots", "candidate and rebuild roots must be directories")
+    if ctx.profile == "phase3-local":
+        verify_phase3_root_identity(ctx.candidate, ctx.rebuild)
 
 
 def stage_2_manifest_text(ctx: GateContext) -> None:
     if ctx.profile in ("hadith-pilot", "hadith-local"):
+        return
+    if ctx.profile == "phase3-local":
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            ctx.raw_manifest_bytes[root_label] = {}
+            parsed_manifests: dict[str, dict[str, Any]] = {}
+            for pid in sorted(PHASE3_RECITATION_PACKS):
+                manifest_fn = f"{pid}.json"
+                m_path = root_path / manifest_fn
+                if not m_path.exists():
+                    raise GateCheckError(5, f"{root_label}/{manifest_fn}", f"{manifest_fn} missing")
+                if not m_path.is_file() or _is_symlink_or_junction(m_path):
+                    raise GateCheckError(5, f"{root_label}/{manifest_fn}", f"{manifest_fn} is a link or non-regular file")
+                raw_b = m_path.read_bytes()
+                ctx.raw_manifest_bytes[root_label][manifest_fn] = raw_b
+                _, data = validate_manifest_text(raw_b, f"{root_label}/{manifest_fn}")
+                parsed_manifests[manifest_fn] = data
+            ctx.manifest_data_by_root[root_label] = parsed_manifests
         return
     for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
         ctx.raw_manifest_bytes[root_label] = {}
@@ -996,6 +1046,24 @@ def _validate_v010_manifests(
             else:
                 raise GateCheckError(5, f"{root_label}/{fn}", f"Unknown companion asset {fn} in descriptor")
 def stage_3_manifest_schemas_inventory(ctx: GateContext) -> None:
+    if ctx.profile == "phase3-local":
+        recitation_schema_path = ctx.specs_dir / "recitation-manifest.schema.json"
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            actual_files = scan_phase3_inventory(root_label, root_path)
+            ctx.declared_files_by_root[root_label] = actual_files
+
+            manifests_dict = ctx.manifest_data_by_root[root_label]
+            for pid in sorted(PHASE3_RECITATION_PACKS):
+                manifest_fn = f"{pid}.json"
+                raw_b = ctx.raw_manifest_bytes[root_label][manifest_fn]
+                data = manifests_dict[manifest_fn]
+                if recitation_schema_path.is_file():
+                    validate_manifest_schema_and_canonical(
+                        raw_b, data, recitation_schema_path, f"{root_label}/{manifest_fn}"
+                    )
+                else:
+                    raise GateCheckError(5, f"specs/{recitation_schema_path.name}", "Manifest schema file missing")
+        return
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         expected_pids = _HADITH_PILOT_PACK_IDS if ctx.profile == "hadith-pilot" else _HADITH_ALL_PACK_IDS
         expected_dbs = sorted([f"{pid}.db" for pid in expected_pids])
@@ -1241,6 +1309,9 @@ def stage_3_manifest_schemas_inventory(ctx: GateContext) -> None:
                 if v_ios["durationSeconds"] != rounded_sec:
                     raise GateCheckError(5, f"{root_label}/{fn}", f"Duration mismatch: manifest {v_ios['durationSeconds']} vs probed {rounded_sec}")
 def stage_4_source_lock_clearance(ctx: GateContext) -> None:
+    if ctx.profile == "phase3-local":
+        verify_phase3_source_lock_and_clearance(ctx.sources_root)
+        return
     if ctx.profile == "v0.1.0":
         entries, reg, lics = validate_release_sources(ctx.sources_root, local_review=ctx.local_review)
         ctx.lock_entries = entries
@@ -1421,7 +1492,11 @@ def stage_4_source_lock_clearance(ctx: GateContext) -> None:
 def _open_ro_db(db_path: Path) -> sqlite3.Connection:
     uri = f"{db_path.resolve().as_uri()}?mode=ro"
     conn = sqlite3.connect(uri, uri=True)
-    conn.execute("PRAGMA trusted_schema = OFF;")
+    try:
+        conn.execute("PRAGMA trusted_schema = OFF;")
+    except Exception:
+        conn.close()
+        raise
     return conn
 
 
@@ -1524,6 +1599,19 @@ def _verify_single_db_schema_and_integrity(
 def stage_5_sqlite_schema_integrity(ctx: GateContext) -> None:
     common_meta_sql = (ctx.specs_sql_dir / "common_meta.sql").read_text(encoding="utf-8")
 
+    if ctx.profile == "phase3-local":
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for pack_id in sorted(PHASE3_DB_PACKS):
+                db_fn = f"{pack_id}.db"
+                try:
+                    _verify_single_db_schema_and_integrity(
+                        ctx, root_label, db_fn, root_path / db_fn, pack_id, common_meta_sql
+                    )
+                except GateCheckError:
+                    raise
+                except (sqlite3.DatabaseError, OSError) as exc:
+                    raise GateCheckError(3, f"{root_label}/{db_fn}", f"SQLite database integrity or read error: {exc}") from exc
+        return
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
             for db_fn in sorted(ctx.declared_files_by_root[root_label]):
@@ -1545,6 +1633,29 @@ def stage_5_sqlite_schema_integrity(ctx: GateContext) -> None:
             )
 
 def stage_6_sqlite_metadata(ctx: GateContext) -> None:
+    if ctx.profile == "phase3-local":
+        if ctx.phase3_ref_dir is None:
+            ctx.phase3_ref_dir = tempfile.TemporaryDirectory()
+        ref_dir = Path(ctx.phase3_ref_dir.name)
+        for pack_id in PHASE3_DB_PACKS:
+            ref_db = build_phase3_reference_db(ctx.sources_root, ref_dir, pack_id)
+            ctx.phase3_ref_dbs[pack_id] = ref_db
+
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for pack_id in PHASE3_DB_PACKS:
+                db_fn = f"{pack_id}.db"
+                db_path = root_path / db_fn
+                ref_db = ctx.phase3_ref_dbs[pack_id]
+                with _open_ro_db(ref_db) as ref_conn, _open_ro_db(db_path) as act_conn:
+                    ref_meta = ref_conn.execute("SELECT key, value FROM pack_meta ORDER BY key;").fetchall()
+                    act_meta = act_conn.execute("SELECT key, value FROM pack_meta ORDER BY key;").fetchall()
+                    if act_meta != ref_meta:
+                        raise GateCheckError(
+                            7,
+                            f"{root_label}/{db_fn}",
+                            f"Metadata mismatch in pack_meta: got {act_meta}, expected {ref_meta}",
+                        )
+        return
     sources_dir = ctx.sources_root / "sources"
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
@@ -1837,6 +1948,30 @@ def _stage_7_record_keys_v010(ctx: GateContext) -> None:
                 conn.close()
 
 def stage_7_record_keys(ctx: GateContext) -> None:
+    if ctx.profile == "phase3-local":
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for pack_id in PHASE3_DB_PACKS:
+                db_fn = f"{pack_id}.db"
+                verify_phase3_acceptance_controls(root_path / db_fn, pack_id, root_label, db_fn)
+                ref_db = ctx.phase3_ref_dbs[pack_id]
+                with _open_ro_db(ref_db) as ref_conn, _open_ro_db(root_path / db_fn) as act_conn:
+                    tables = [
+                        r[0] for r in ref_conn.execute(
+                            "SELECT name FROM sqlite_schema WHERE type='table' "
+                            "AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '%_fts%' AND name NOT LIKE '%_config%' "
+                            "ORDER BY name;"
+                        ).fetchall()
+                    ]
+                    for tbl in tables:
+                        col_info = ref_conn.execute(f"PRAGMA table_info({tbl});").fetchall()
+                        pk_cols = [r[1] for r in col_info if r[5] > 0]
+                        if pk_cols:
+                            pk_select = ", ".join(pk_cols)
+                            ref_pks = ref_conn.execute(f"SELECT {pk_select} FROM {tbl} ORDER BY {pk_select};").fetchall()
+                            act_pks = act_conn.execute(f"SELECT {pk_select} FROM {tbl} ORDER BY {pk_select};").fetchall()
+                            if act_pks != ref_pks:
+                                raise GateCheckError(1, f"{root_label}/{db_fn}", f"Primary key mismatch in table {tbl}")
+        return
     if ctx.profile == "v0.1.0":
         _stage_7_record_keys_v010(ctx)
         return
@@ -2165,6 +2300,42 @@ def _verify_hadith_db_text_and_source(
     )
 
 def stage_8_text_equivalence(ctx: GateContext) -> None:
+    if ctx.profile == "phase3-local":
+        from pipelines.validators.word_alignment import validate_word_alignment
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            try:
+                validate_word_alignment(
+                    root_path / "quran-core.db",
+                    root_path / "quran-morphology.db",
+                    root_path / "quran-wbw-en.db",
+                )
+            except ValueError as exc:
+                raise GateCheckError(8, f"{root_label}/word_alignment", str(exc)) from exc
+
+        for pack_id in PHASE3_DB_PACKS:
+            db_fn = f"{pack_id}.db"
+            ref_db = ctx.phase3_ref_dbs[pack_id]
+            verify_db_content_against_reference(
+                cand_db=ctx.candidate / db_fn,
+                reb_db=ctx.rebuild / db_fn,
+                ref_db=ref_db,
+                pack_id=pack_id,
+                db_fn=db_fn,
+            )
+
+        from pipelines.builders.build_recitation_manifests import render_recitation_manifest
+        for pack_id in PHASE3_RECITATION_PACKS:
+            manifest_fn = f"{pack_id}.json"
+            expected_bytes = render_recitation_manifest(ctx.sources_root, pack_id)
+            for root_label in ("candidate", "rebuild"):
+                actual_bytes = ctx.raw_manifest_bytes[root_label][manifest_fn]
+                if actual_bytes != expected_bytes:
+                    raise GateCheckError(
+                        2,
+                        f"{root_label}/{manifest_fn}",
+                        "Recitation manifest content differs from locked source render",
+                    )
+        return
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
             for db_fn in sorted(ctx.declared_files_by_root[root_label]):
@@ -2366,6 +2537,21 @@ def stage_8_text_equivalence(ctx: GateContext) -> None:
 
 
 def stage_9_coverage(ctx: GateContext) -> None:
+    if ctx.profile == "phase3-local":
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for pack_id in PHASE3_DB_PACKS:
+                db_fn = f"{pack_id}.db"
+                ref_db = ctx.phase3_ref_dbs[pack_id]
+                with _open_ro_db(ref_db) as ref_conn, _open_ro_db(root_path / db_fn) as act_conn:
+                    ref_cov = ref_conn.execute("SELECT metric, count, notes FROM coverage_report ORDER BY metric;").fetchall()
+                    act_cov = act_conn.execute("SELECT metric, count, notes FROM coverage_report ORDER BY metric;").fetchall()
+                    if act_cov != ref_cov:
+                        raise GateCheckError(
+                            1,
+                            f"{root_label}/{db_fn}",
+                            f"coverage_report mismatch: got {act_cov}, expected {ref_cov}",
+                        )
+        return
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
             for db_fn in sorted(ctx.declared_files_by_root[root_label]):
@@ -2683,6 +2869,16 @@ def _run_fts_hadith_local(ctx: GateContext, root_label: str, db_fn: str, db_path
 
 
 def stage_10_fts(ctx: GateContext) -> None:
+    if ctx.profile == "phase3-local":
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for pack_id in PHASE3_DB_PACKS:
+                db_fn = f"{pack_id}.db"
+                db_path = root_path / db_fn
+                fts_tables = _PACK_FTS_MAP.get(pack_id, ())
+                if fts_tables:
+                    _run_fts_temp_integrity_check(db_path, fts_tables, root_label, db_fn, pack_id)
+                    run_phase3_fts_smoke(db_path, pack_id, root_label, db_fn)
+        return
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
             for db_fn in sorted(ctx.declared_files_by_root[root_label]):
@@ -2857,6 +3053,27 @@ def _stage_11_tafsir_v010(ctx: GateContext) -> None:
 
 
 def stage_11_tafsir(ctx: GateContext) -> None:
+    if ctx.profile == "phase3-local":
+        tafsir_packs = [p for p in PHASE3_DB_PACKS if p.startswith("quran-tafsir-")]
+        for root_label, root_path in (("candidate", ctx.candidate), ("rebuild", ctx.rebuild)):
+            for pack_id in tafsir_packs:
+                db_fn = f"{pack_id}.db"
+                ref_db = ctx.phase3_ref_dbs[pack_id]
+                with closing(_open_ro_db(ref_db)) as ref_conn, closing(_open_ro_db(root_path / db_fn)) as act_conn:
+                    ref_map = ref_conn.execute("SELECT ayah_id, verse_key, entry_id FROM tafsir_ayah_map ORDER BY ayah_id;").fetchall()
+                    act_map = act_conn.execute("SELECT ayah_id, verse_key, entry_id FROM tafsir_ayah_map ORDER BY ayah_id;").fetchall()
+                    if act_map != ref_map:
+                        raise GateCheckError(9, f"{root_label}/{db_fn}", f"Tafsir ayah map pointer mismatch in {pack_id}")
+
+                    ref_entries = ref_conn.execute(
+                        "SELECT id, group_key, start_ayah_id, end_ayah_id FROM tafsir_entries ORDER BY id;"
+                    ).fetchall()
+                    act_entries = act_conn.execute(
+                        "SELECT id, group_key, start_ayah_id, end_ayah_id FROM tafsir_entries ORDER BY id;"
+                    ).fetchall()
+                    if act_entries != ref_entries:
+                        raise GateCheckError(9, f"{root_label}/{db_fn}", f"Tafsir entries interval mismatch in {pack_id}")
+        return
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         return
     if ctx.profile == "v0.1.0":
@@ -2994,14 +3211,20 @@ def stage_12_cross_root_equality(ctx: GateContext) -> None:
         if c_size != r_size:
             raise GateCheckError(6, fn, f"Size difference in {fn} between candidate and rebuild: {c_size} vs {r_size}")
 
-        with open(c_file, "rb") as f1, open(r_file, "rb") as f2:
-            while True:
-                b1 = f1.read(65536)
-                b2 = f2.read(65536)
-                if b1 != b2:
-                    raise GateCheckError(6, fn, f"Distributable byte difference in {fn} between candidate and rebuild")
-                if not b1:
-                    break
+        if ctx.profile == "phase3-local":
+            c_sha = _recompute_sha256(c_file)
+            r_sha = _recompute_sha256(r_file)
+            if c_sha != r_sha:
+                raise GateCheckError(6, fn, f"SHA-256 difference in {fn} between candidate and rebuild: {c_sha} vs {r_sha}")
+        else:
+            with open(c_file, "rb") as f1, open(r_file, "rb") as f2:
+                while True:
+                    b1 = f1.read(65536)
+                    b2 = f2.read(65536)
+                    if b1 != b2:
+                        raise GateCheckError(6, fn, f"Distributable byte difference in {fn} between candidate and rebuild")
+                    if not b1:
+                        break
 
 
 _STAGE_HANDLERS = [
@@ -3030,15 +3253,14 @@ def run_checks(
     expectations: dict[str, Any] | None = None,
     local_review: bool = False,
 ) -> None:
-    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local"):
+    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local", "phase3-local"):
         raise ValueError(f"Unsupported profile: {profile!r}")
     if local_review and profile != "v0.1.0":
         raise ValueError("local_review is only permitted for profile 'v0.1.0'")
     if profile == "fixture" and expectations is None:
         raise ValueError("expectations is required for fixture profile")
-    if profile in ("v0.1.0", "hadith-pilot", "hadith-local") and expectations is not None:
+    if profile in ("v0.1.0", "hadith-pilot", "hadith-local", "phase3-local") and expectations is not None:
         raise ValueError(f"expectations is not permitted for {profile} profile")
-
     repo_root = Path(__file__).resolve().parents[2]
     specs_dir = repo_root / "specs"
 
@@ -3052,25 +3274,32 @@ def run_checks(
         local_review=local_review,
     )
 
-    for stage_idx, (stage_name, check_num) in enumerate(_STAGES):
-        handler = _STAGE_HANDLERS[stage_idx]
-        try:
-            handler(ctx)
-        except GateCheckError as exc:
-            _fail(stage_idx, exc.check_num, exc.asset, exc.reason)
-
+    try:
+        for stage_idx, (stage_name, check_num) in enumerate(_STAGES):
+            handler = _STAGE_HANDLERS[stage_idx]
+            try:
+                handler(ctx)
+            except GateCheckError as exc:
+                _fail(stage_idx, exc.check_num, exc.asset, exc.reason, profile=ctx.profile)
+    finally:
+        if ctx.phase3_ref_dir is not None:
+            ctx.phase3_ref_dir.cleanup()
     print("Check #1: Passed (inventory, keys, coverage)")
     print("Check #2: Passed (text encoding, projections, split evidence)")
     print("Check #3: Passed (SQLite integrity, foreign keys, schema)")
     print("Check #4: Passed (FTS integrity and query verification)")
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         print("Check #5: Passed (flat DB asset inventory and sizes)")
+    elif ctx.profile == "phase3-local":
+        print("Check #5: Passed (flat DB asset inventory, sizes, and recitation schemas)")
     else:
         print("Check #5: Passed (manifest schemas, asset verification, probes)")
     print("Check #6: Passed (root identity and cross-root byte equality)")
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         expected_pids = _HADITH_PILOT_PACK_IDS if ctx.profile == "hadith-pilot" else _HADITH_ALL_PACK_IDS
         print(f"Clearance pending (local verification only): {', '.join(expected_pids)}")
+    elif ctx.profile == "phase3-local":
+        print(f"Clearance pending (local verification only): {', '.join(PHASE3_ALL_PACKS)}")
     elif ctx.profile == "v0.1.0" and ctx.local_review:
         pending_packs = sorted([
             pid for pid, rec in ctx.license_records.items()
@@ -3082,7 +3311,10 @@ def run_checks(
             print("Check #7: Passed (source lock, licenses, metadata reconciliation)")
     else:
         print("Check #7: Passed (source lock, licenses, metadata reconciliation)")
-    print("Check 8: Not applicable (no production QAC/QUL pair).")
+    if ctx.profile == "phase3-local":
+        print("Check #8: Passed (QAC/QUL word alignment)")
+    else:
+        print("Check 8: Not applicable (no production QAC/QUL pair).")
     if ctx.profile in ("hadith-pilot", "hadith-local"):
         print("Check 9: Not applicable (no Tafsir packs in Hadith profile).")
     else:
@@ -3221,9 +3453,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     profile = args.profile
-    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local"):
+    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local", "phase3-local"):
         sys.stderr.write(
-            f"CLI error: unsupported profile {profile!r}; must be 'fixture', 'v0.1.0', 'hadith-pilot', or 'hadith-local'\n"
+            f"CLI error: unsupported profile {profile!r}; must be 'fixture', 'v0.1.0', 'hadith-pilot', 'hadith-local', or 'phase3-local'\n"
         )
         return 2
 
@@ -3276,7 +3508,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except GateCheckError as exc:
         sys.stderr.write(f"Check #{exc.check_num} failed on {exc.asset}: {exc.reason}\n")
-        sys.stderr.write("Check 8: Not applicable (no production QAC/QUL pair).\n")
+        if exc.check_num != 8 and profile != "phase3-local":
+            sys.stderr.write("Check 8: Not applicable (no production QAC/QUL pair).\n")
         return 1
 
 

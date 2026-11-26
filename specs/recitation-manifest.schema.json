@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://islamic-core-content/specs/recitation-manifest.schema.json",
+  "title": "RecitationManifest",
+  "description": "Schema for canonical ayah recitation timing manifests",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "recitationManifestVersion",
+    "packId",
+    "licenseRef",
+    "buildInputSha256",
+    "reciter",
+    "style",
+    "riwayah",
+    "timingOrigin",
+    "ayahs"
+  ],
+  "properties": {
+    "recitationManifestVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "packId": {
+      "type": "string",
+      "enum": [
+        "audio-recitation-abdul-basit-mujawwad",
+        "audio-recitation-abdul-basit-murattal",
+        "audio-recitation-al-husary-muallim",
+        "audio-recitation-al-husary-mujawwad",
+        "audio-recitation-al-husary-murattal",
+        "audio-recitation-al-minshawi-murattal",
+        "audio-recitation-al-tablawi-murattal"
+      ]
+    },
+    "licenseRef": {
+      "type": "string",
+      "pattern": "^sources/licenses/audio-recitation-[a-z0-9-]+[.]json$"
+    },
+    "buildInputSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reciter": {
+      "type": "string",
+      "minLength": 1
+    },
+    "style": {
+      "type": "string",
+      "enum": [
+        "mujawwad",
+        "murattal",
+        "muallim"
+      ]
+    },
+    "riwayah": {
+      "type": "string",
+      "const": "hafs"
+    },
+    "timingOrigin": {
+      "type": "string",
+      "const": "ayah-audio-start"
+    },
+    "ayahs": {
+      "type": "array",
+      "minItems": 6236,
+      "maxItems": 6236,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "ayahId",
+          "verseKey",
+          "audioUrl",
+          "reportedDurationMs",
+          "segments",
+          "invalidSourceSegments"
+        ],
+        "properties": {
+          "ayahId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6236
+          },
+          "verseKey": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,2}:[1-9][0-9]{0,2}$"
+          },
+          "audioUrl": {
+            "type": "string",
+            "pattern": "^https://[a-zA-Z0-9_.:/-]+/[0-9]{6}[.]mp3$"
+          },
+          "reportedDurationMs": {
+            "type": ["integer", "null"],
+            "minimum": 0
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            }
+          },
+          "invalidSourceSegments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sourceIndex",
+                "segment"
+              ],
+              "properties": {
+                "sourceIndex": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "segment": {
+                  "type": "array",
+                  "prefixItems": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  ],
+                  "items": false,
+                  "minItems": 3,
+                  "maxItems": 3
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

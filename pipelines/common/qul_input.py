@@ -53,7 +53,12 @@ def read_zip_member_bytes(zip_path: Path | str, expected_name: str | None = None
         return zf.read(member)
 
 
-def read_zip_strict_json(zip_path: Path | str, expected_name: str | None = None) -> Any:
+def read_zip_strict_json(
+    zip_path: Path | str,
+    expected_name: str | None = None,
+    *,
+    allow_decimal: bool = False,
+) -> Any:
     """Read and parse strict UTF-8 JSON from a verified single-member zip archive."""
     raw_bytes = read_zip_member_bytes(zip_path, expected_name=expected_name)
     try:
@@ -61,7 +66,7 @@ def read_zip_strict_json(zip_path: Path | str, expected_name: str | None = None)
     except UnicodeDecodeError as e:
         raise ValueError(f"Invalid UTF-8 in archive {zip_path}: {e}") from e
     try:
-        return parse_strict_json(decoded_text)
+        return parse_strict_json(decoded_text, allow_decimal=allow_decimal)
     except Exception as e:
         raise ValueError(f"Invalid JSON in archive {zip_path}: {e}") from e
 

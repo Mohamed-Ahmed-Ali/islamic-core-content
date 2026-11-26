@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 import hashlib
 import json
 import os
@@ -155,13 +156,17 @@ def _validate_decoded_chars_recursively(obj: Any) -> None:
             _validate_decoded_chars_recursively(item)
 
 
-def parse_strict_json(raw_text: str) -> Any:
-    """Parse JSON enforcing strict UTF-8, no duplicate keys, and no float literals."""
+def parse_strict_json(raw_text: str, *, allow_decimal: bool = False) -> Any:
+    """Parse JSON enforcing strict UTF-8, no duplicate keys, and no float literals by default.
+
+    If allow_decimal is True, parse floating-point tokens using Decimal.
+    """
     _validate_decoded_string(raw_text)
+    float_hook = Decimal if allow_decimal else _reject_float_tokens
     data = json.loads(
         raw_text,
         object_pairs_hook=_no_duplicate_keys_object_pairs_hook,
-        parse_float=_reject_float_tokens,
+        parse_float=float_hook,
         parse_constant=_reject_constant,
     )
     _validate_decoded_chars_recursively(data)

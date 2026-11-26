@@ -166,7 +166,7 @@ Data is split into granular, independently downloadable packs so apps only downl
 | `quran-morphology` | SQLite | `none` | Quranic Arabic Corpus 0.4 | `GPL-3.0` (isolated) |
 | `hadith-{book}` | SQLite | `none` | Sunnah.com JSON | Audited per-pack |
 | `audio-adhan-core` | M4A + CAF | Native audio | Six Adhan masters | None cleared for v0.1.0 |
-| `audio-recitation-{qari}` | Manifest + SQLite segments | `none` | QUL JSON | Remote audio URLs + local timing index |
+| `audio-recitation-{edition}` | JSON timing manifest | `none` | QUL ayah-by-ayah JSON | Pending; remote audio URLs only |
 
 Al-Qurtubi maps all 6,236 verses, including the two source-empty entries at `34:54` and `59:19`. It preserves the source HTML and reports `ar_present=6234` with partial completeness. Saheeh stores verse HTML and note bodies separately; its search index excludes footnote markers and note text.
 
@@ -670,9 +670,15 @@ Encode from audio stream `0:a:0`, one channel with FFmpeg's standard mono mix an
 
 * Each individual release asset must remain **strictly under 2 GiB**.
 * Up to **1,000 assets** may be attached to a single release tag, with no documented total release size cap or public download bandwidth fee.
-* Large Quran recitation libraries are not uploaded to GitHub Releases. The closed v1 audio schema is Adhan-only; later recitation metadata/timing requires its own explicit manifest contract.
+* Large Quran recitation libraries are not uploaded to GitHub Releases. The closed v1 audio schema is Adhan-only; recitation timings have a separate local manifest contract.
 
 Use the tag, dual-build, draft and public verification sequence in `PLAN.md` Task 1.7. Commit the canonical manifests with the reviewed lock and license records before tagging; compare both tagged rebuilds to those bytes and gate both before any upload. Validate draft attachments, then publish and recheck public URLs.
+
+### Local recitation timing manifests (Phase 3)
+
+`specs/recitation-manifest.schema.json` defines one `audio-recitation-{edition}.json` per pinned reciter/style. Each lists all 6,236 verses in numeric order, with exact source HTTPS URLs and 1-based word positions. Timing intervals are integer milliseconds relative to the start of each ayah file. Reported duration is nullable and independent of the timings; numeric source seconds are rounded to milliseconds half-up, never used to clamp intervals.
+
+Valid intervals retain source order, including repeated positions and overlaps. The 18 known nonpositive Al-Tablawi intervals are excluded from playback timings and preserved in `invalidSourceSegments` with their original one-based source indexes. The pipeline does not read or download audio.
 
 ### 7.4 Atomic Client Installation Protocol (`user.db` Separation)
 
@@ -702,9 +708,10 @@ python -m pipelines.validators.quality_gate --profile fixture --candidate A --re
 python -m pipelines.validators.quality_gate --profile v0.1.0 --candidate A --rebuild B --sources-root S
 python -m pipelines.validators.quality_gate --profile hadith-pilot --candidate A --rebuild B --sources-root S
 python -m pipelines.validators.quality_gate --profile hadith-local --candidate A --rebuild B --sources-root S
+python -m pipelines.validators.quality_gate --profile phase3-local --candidate A --rebuild B --sources-root S
 ```
 
-`A` and `B` are distinct, independently built clean directories with the same exact-case flat release asset paths, including `catalog.json` and `audio-manifest.json` in each root (or flat DB-only roots for Hadith local profiles). `S/raw-inputs/` contains staged inputs; `S/sources/` contains `registry.json`, `manifest.lock.json` and `licenses/{id}.json`. Only release mode also reads `S/sources/release-v0.1.0.json` (§7.1). Fixture mode requires `--expectations` pointing to the checked-in `tests/fixtures/expectations.json` (`PLAN.md` Phase 0); release mode and both Hadith profiles reject the flag and never read fixture oracles. Validate both roots independently and compare them; do not build or upload. CLI misuse exits `2`; validation exits `1` with check number, offending path or pack/key, and reason; exit `0` only if every applicable check passes. Report explicit not-applicable reasons; a missing expected item is failure, never a skip.
+`A` and `B` are distinct, independently built clean directories with the same exact-case flat artifact paths. Fixture and release roots include `catalog.json` and `audio-manifest.json`; local profiles use the inventory below. `S/raw-inputs/` contains staged inputs; `S/sources/` contains `registry.json`, `manifest.lock.json` and `licenses/{id}.json`. Only release mode reads `S/sources/release-v0.1.0.json` (§7.1). Fixture mode alone requires `--expectations` pointing to the checked-in `tests/fixtures/expectations.json`. Validate both roots independently before comparing them; Phase 3 may derive a disposable reference from the locked inputs and never mutates either root or uploads artifacts. CLI misuse exits `2`; validation exits `1` with the check number, offending path or pack/key, and reason; exit `0` only if every applicable check passes. A missing expected item is a failure, not a skip.
 
 Reject `A` and `B` with the same filesystem identity (#6). Manifest/asset entries must be regular files, not links or junctions; reject file inode aliases across the roots. The workflow creates and builds each clean root independently; the gate establishes byte equality, not build history.
 
@@ -716,7 +723,17 @@ Run in this order, failing fast at the first offending asset in lexical path ord
 | `v0.1.0` (Phase 1) | #1–#7 and #9 as applicable to all five SQLite packs and both variants of each of the six tracks. #8 is not applicable: no QUL WBW pack. No partial coverage or missing item permitted. |
 | `hadith-pilot` (Local only) | Flat DB-only roots for `hadith-bukhari.db` and `hadith-muslim.db`. Verifies canonical lock, pending licenses ('Clearance pending (local verification only)'), SQLite schema, keys, text, coverage, dual FTS token coverage and queries, and cross-root byte equality. Manifest checks and #8/#9 not applicable. |
 | `hadith-local` (Local only) | Flat DB-only roots for all nine Hadith packs (`bukhari`, `muslim`, `nasai`, `abudawud`, `tirmidhi`, `ibnmajah`, `malik`, `darimi`, `ahmad`). Same local checks across the entire nine-pack inventory. |
-| First profile shipping QAC and QUL WBW | #8 also applies whenever both ship. Define that profile and its oracles in Phase 3. |
+| `phase3-local` (Local only) | Exactly 12 SQLite packs and seven recitation timing manifests from `pipelines.release.build_phase3_local`, with no catalog or audio files. Reconciles both roots against locked sources, applies #8 and #9, and checks all 19 sizes and SHA-256 digests. Passing this profile does not clear redistribution rights. |
+
+Build and verify the Phase 3 roots in the pinned Linux runtime, with networking disabled:
+
+```sh
+python -m pipelines.release.build_phase3_local --sources-root S --output-dir A
+python -m pipelines.release.build_phase3_local --sources-root S --output-dir B
+python -m pipelines.validators.quality_gate --profile phase3-local --candidate A --rebuild B --sources-root S
+python -m pipelines.validators.phase3_concordance A
+python -m pipelines.validators.phase3_concordance B
+```
 
 For v0.1.0 #4 restricts each smoke query to `rowid=2` and expects `[2]`: core `رَبِّ العالمين` and `رب العالمين`, Jalalayn the same pair, Pickthall `Lord of the Worlds`. The negative literal `zzzzfixturemissing` returns `[]` for each table at that row. Perform queries using the §6 literal binding rule. Fixture #4 uses the checked-in oracle instead.
 
