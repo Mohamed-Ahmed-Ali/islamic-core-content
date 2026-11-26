@@ -803,6 +803,7 @@ python -m pipelines.validators.quality_gate --profile v0.1.0 --candidate A --reb
 python -m pipelines.validators.quality_gate --profile hadith-pilot --candidate A --rebuild B --sources-root S
 python -m pipelines.validators.quality_gate --profile hadith-local --candidate A --rebuild B --sources-root S
 python -m pipelines.validators.quality_gate --profile phase3-local --candidate A --rebuild B --sources-root S
+python -m pipelines.validators.quality_gate --profile hadith-taqreeb-local --candidate A --rebuild B --sources-root S
 ```
 
 `A` and `B` are distinct, independently built clean directories with the same exact-case flat artifact paths. Fixture and release roots include `catalog.json` and `audio-manifest.json`; local profiles use the inventory below. `S/raw-inputs/` contains staged inputs; `S/sources/` contains `registry.json`, `manifest.lock.json` and `licenses/{id}.json`. Only release mode reads `S/sources/release-v0.1.0.json` (§7.1). Fixture mode alone requires `--expectations` pointing to the checked-in `tests/fixtures/expectations.json`. Validate both roots independently before comparing them; Phase 3 may derive a disposable reference from the locked inputs and never mutates either root or uploads artifacts. CLI misuse exits `2`; validation exits `1` with the check number, offending path or pack/key, and reason; exit `0` only if every applicable check passes. A missing expected item is a failure, not a skip.
@@ -818,6 +819,7 @@ Run in this order, failing fast at the first offending asset in lexical path ord
 | `hadith-pilot` (Local only) | Flat DB-only roots for `hadith-bukhari.db` and `hadith-muslim.db`. Verifies canonical lock, pending licenses ('Clearance pending (local verification only)'), SQLite schema, keys, text, coverage, dual FTS token coverage and queries, and cross-root byte equality. Manifest checks and #8/#9 not applicable. |
 | `hadith-local` (Local only) | Flat DB-only roots for all nine Hadith packs (`bukhari`, `muslim`, `nasai`, `abudawud`, `tirmidhi`, `ibnmajah`, `malik`, `darimi`, `ahmad`). Same local checks across the entire nine-pack inventory. |
 | `phase3-local` (Local only) | Exactly 12 SQLite packs and seven recitation timing manifests from `pipelines.release.build_phase3_local`, with no catalog or audio files. Reconciles both roots against locked sources, applies #8 and #9, and checks all 19 sizes and SHA-256 digests. Passing this profile does not clear redistribution rights. |
+| `hadith-taqreeb-local` (Phase 4, local only) | Flat DB-only roots for the four Taqreeb packs (`hadith-taqreeb-jami.db`, `hadith-taqreeb-maalim.db`, `hadith-taqreeb-wajeez.db`, `hadith-taqreeb-kulliyyah.db`). Verifies canonical lock, pending licenses ('Clearance pending (local verification only)'), SQLite schema, source fidelity and row-by-row traversal against original Realm JSON exports, exact anomaly preservation, coverage metrics, FTS5 token search and integrity, and cross-root byte equality. Manifest checks and #8/#9 not applicable. |
 
 Build and verify the Phase 3 roots in the pinned Linux runtime, with networking disabled:
 
@@ -827,6 +829,17 @@ python -m pipelines.release.build_phase3_local --sources-root S --output-dir B
 python -m pipelines.validators.quality_gate --profile phase3-local --candidate A --rebuild B --sources-root S
 python -m pipelines.validators.phase3_concordance A
 python -m pipelines.validators.phase3_concordance B
+```
+
+Build and verify the Phase 4 Taqreeb roots in the pinned Linux runtime, with networking disabled:
+
+```sh
+for OUT in A B; do
+  for suffix in jami maalim wajeez kulliyyah; do
+    python -m pipelines.builders.hadith_taqreeb_builder --pack-id "hadith-taqreeb-$suffix" --sources-root S --output-dir "$OUT"
+  done
+done
+python -m pipelines.validators.quality_gate --profile hadith-taqreeb-local --candidate A --rebuild B --sources-root S
 ```
 
 For v0.1.0 #4 restricts each smoke query to `rowid=2` and expects `[2]`: core `رَبِّ العالمين` and `رب العالمين`, Jalalayn the same pair, Pickthall `Lord of the Worlds`. The negative literal `zzzzfixturemissing` returns `[]` for each table at that row. Perform queries using the §6 literal binding rule. Fixture #4 uses the checked-in oracle instead.

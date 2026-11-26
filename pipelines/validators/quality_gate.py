@@ -42,6 +42,7 @@ from pipelines.release.release_packs import MORPHOLOGY_SOURCE_ARCHIVE_MEMBERS, l
 from pipelines.toolchain.check_runtime import verify_runtime
 from pipelines.common.pack_sources import load_sqlite_source_metadata
 
+from pipelines.common.stage_taqreeb_inputs import TAQREEB_SOURCES
 from pipelines.validators.phase3_local import (
     GateCheckError,
     PHASE3_ALL_PACKS,
@@ -276,6 +277,9 @@ for _slug in _HADITH_LOCAL_ORACLE:
     _PACK_SCHEMA_MAP[f"hadith-{_slug}"] = "hadith_book.v1.sql"
     _PACK_FTS_MAP[f"hadith-{_slug}"] = ("hadiths_fts", "hadiths_full_fts")
     _EXPECTED_COVERAGE_METRICS[f"hadith-{_slug}"] = {"expected_total", "ar_present", "en_present", "en_missing"}
+for pack_id in TAQREEB_SOURCES:
+    _PACK_SCHEMA_MAP[pack_id] = "hadith_taqreeb_v1.sql"
+    _PACK_FTS_MAP[pack_id] = ("hadiths_fts",)
 
 _strict_type_checker = Draft202012Validator.TYPE_CHECKER.redefine(
     "integer",
@@ -1516,9 +1520,12 @@ def _verify_single_db_schema_and_integrity(
     conn = _open_ro_db(db_path)
     try:
         cur = conn.cursor()
-        res_int = cur.execute("PRAGMA integrity_check;").fetchall()
-        if res_int != [("ok",)] and res_int != [(b"ok",)]:
-            raise GateCheckError(3, f"{root_label}/{db_fn}", f"integrity_check failed: {res_int}")
+        try:
+            res_int = cur.execute("PRAGMA integrity_check;").fetchall()
+            if res_int != [("ok",)] and res_int != [(b"ok",)]:
+                raise GateCheckError(3, f"{root_label}/{db_fn}", f"integrity_check failed: {res_int}")
+        except sqlite3.DatabaseError as exc:
+            raise GateCheckError(3, f"{root_label}/{db_fn}", f"integrity_check failed: {exc}") from exc
 
         res_fk = cur.execute("PRAGMA foreign_key_check;").fetchall()
         if res_fk:
@@ -3242,6 +3249,11 @@ _STAGE_HANDLERS = [
     stage_11_tafsir,
     stage_12_cross_root_equality,
 ]
+def _run_hadith_taqreeb_local(ctx: GateContext) -> None:
+    from pipelines.validators.hadith_taqreeb_local import run_hadith_taqreeb_local
+
+    run_hadith_taqreeb_local(ctx)
+
 
 
 def run_checks(
@@ -3253,13 +3265,13 @@ def run_checks(
     expectations: dict[str, Any] | None = None,
     local_review: bool = False,
 ) -> None:
-    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local", "phase3-local"):
+    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local", "phase3-local", "hadith-taqreeb-local"):
         raise ValueError(f"Unsupported profile: {profile!r}")
     if local_review and profile != "v0.1.0":
         raise ValueError("local_review is only permitted for profile 'v0.1.0'")
     if profile == "fixture" and expectations is None:
         raise ValueError("expectations is required for fixture profile")
-    if profile in ("v0.1.0", "hadith-pilot", "hadith-local", "phase3-local") and expectations is not None:
+    if profile in ("v0.1.0", "hadith-pilot", "hadith-local", "phase3-local", "hadith-taqreeb-local") and expectations is not None:
         raise ValueError(f"expectations is not permitted for {profile} profile")
     repo_root = Path(__file__).resolve().parents[2]
     specs_dir = repo_root / "specs"
@@ -3273,6 +3285,10 @@ def run_checks(
         specs_dir=specs_dir,
         local_review=local_review,
     )
+    if profile == "hadith-taqreeb-local":
+        _run_hadith_taqreeb_local(ctx)
+        return
+
 
     try:
         for stage_idx, (stage_name, check_num) in enumerate(_STAGES):
@@ -3453,9 +3469,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     profile = args.profile
-    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local", "phase3-local"):
+    if profile not in ("fixture", "v0.1.0", "hadith-pilot", "hadith-local", "phase3-local", "hadith-taqreeb-local"):
         sys.stderr.write(
-            f"CLI error: unsupported profile {profile!r}; must be 'fixture', 'v0.1.0', 'hadith-pilot', 'hadith-local', or 'phase3-local'\n"
+            f"CLI error: unsupported profile {profile!r}; must be 'fixture', 'v0.1.0', 'hadith-pilot', 'hadith-local', 'phase3-local', or 'hadith-taqreeb-local'\n"
         )
         return 2
 
