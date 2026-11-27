@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from fractions import Fraction
 import json
+import hashlib
 import math
 import os
 from pathlib import Path
 import struct
 import subprocess
 import wave
+import sys
 import pytest
 
 from pipelines.common.audio_probe import probe_asset
@@ -494,3 +496,190 @@ def test_loudnorm_strict_json_validation(
         )
         with pytest.raises(ValueError, match=r"(?i)(token|numeric|loudnorm|decimal)"):
             _measure_loudnorm(ffmpeg_path, test_audio)
+
+
+def test_local_adhan_stages_and_builds_only_pinned_tracks(tmp_path: Path) -> None:
+    sources_root = tmp_path / "repo"
+    contant_adhan = sources_root / "Contant" / "adhan"
+    contant_adhan.mkdir(parents=True, exist_ok=True)
+    sources_dir = sources_root / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+
+    sample_file = contant_adhan / "sample_fajr.mp3"
+    _generate_synthetic_tone(sample_file, duration_s=2.0)
+    sample_bytes = sample_file.read_bytes()
+    sample_sha256 = hashlib.sha256(sample_bytes).hexdigest()
+
+    unlisted_file = contant_adhan / "unlisted.mp3"
+    _generate_synthetic_tone(unlisted_file, duration_s=2.0)
+    unlisted_bytes = unlisted_file.read_bytes()
+
+    intake_json = sources_dir / "adhan-local-intake.json"
+    intake_data = {
+        "status": "pending",
+        "tracks": [
+            {
+                "basename": "sample_fajr.mp3",
+                "reciter": "Sample Reciter",
+                "sha256": sample_sha256,
+                "slug": "sample-fajr",
+            }
+        ],
+    }
+    intake_json.write_text(json.dumps(intake_data, indent=2) + "\n", encoding="utf-8")
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "pipelines.builders.build_audio_adhan_local",
+            "stage",
+            "--sources-root",
+            str(sources_root),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    staged_file = sources_root / "raw-inputs" / "audio" / "adhan-local" / "sample_fajr.mp3"
+    assert staged_file.is_file()
+    assert staged_file.read_bytes() == sample_bytes
+    assert not (sources_root / "raw-inputs" / "audio" / "adhan-local" / "unlisted.mp3").exists()
+
+    # Repeat stage: succeeds, does not corrupt or rewrite files
+    subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "pipelines.builders.build_audio_adhan_local",
+            "stage",
+            "--sources-root",
+            str(sources_root),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    assert staged_file.read_bytes() == sample_bytes
+    assert sample_file.read_bytes() == sample_bytes
+    assert unlisted_file.read_bytes() == unlisted_bytes
+
+    # Rename original source directory away before build
+    (sources_root / "Contant").rename(sources_root / "Contant_away")
+
+    out_dir = tmp_path / "out"
+    subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "pipelines.builders.build_audio_adhan_local",
+            "build",
+            "--sources-root",
+            str(sources_root),
+            "--output-dir",
+            str(out_dir),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    full_asset = out_dir / "adhan-sample-fajr-full.m4a"
+    ios_asset = out_dir / "adhan-sample-fajr-ios-notif.caf"
+    assert full_asset.is_file()
+    assert ios_asset.is_file()
+
+    full_codec, full_dur = probe_asset(full_asset, variant="full")
+    assert full_codec == "aac"
+    assert full_dur > 0
+
+    ios_codec, ios_dur = probe_asset(ios_asset, variant="ios")
+    assert ios_codec == "adpcm_ima_qt"
+    assert 0 < ios_dur < 29
+
+    assert (sources_root / "catalog").exists() is False
+
+
+def test_local_adhan_rejects_changed_staged_master(tmp_path: Path) -> None:
+    sources_root = tmp_path / "repo"
+    contant_adhan = sources_root / "Contant" / "adhan"
+    contant_adhan.mkdir(parents=True, exist_ok=True)
+    sources_dir = sources_root / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+
+    sample_file = contant_adhan / "sample_fajr.mp3"
+    _generate_synthetic_tone(sample_file, duration_s=2.0)
+    sample_bytes = sample_file.read_bytes()
+    sample_sha256 = hashlib.sha256(sample_bytes).hexdigest()
+
+    intake_json = sources_dir / "adhan-local-intake.json"
+    intake_data = {
+        "status": "pending",
+        "tracks": [
+            {
+                "basename": "sample_fajr.mp3",
+                "reciter": "Sample Reciter",
+                "sha256": sample_sha256,
+                "slug": "sample-fajr",
+            }
+        ],
+    }
+    intake_json.write_text(json.dumps(intake_data, indent=2) + "\n", encoding="utf-8")
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "pipelines.builders.build_audio_adhan_local",
+            "stage",
+            "--sources-root",
+            str(sources_root),
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+    staged_file = sources_root / "raw-inputs" / "audio" / "adhan-local" / "sample_fajr.mp3"
+    assert staged_file.is_file()
+
+    # Mutate the staged copy
+    staged_file.write_bytes(b"MUTATED")
+
+    # Re-running stage fails with nonzero exit status and does not overwrite mutated file
+    res_stage = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "pipelines.builders.build_audio_adhan_local",
+            "stage",
+            "--sources-root",
+            str(sources_root),
+        ],
+        capture_output=True,
+    )
+    assert res_stage.returncode != 0
+    assert staged_file.read_bytes() == b"MUTATED"
+
+    # Running build fails with exit code 1, sample_fajr.mp3 mentioned in stderr, no output dir
+    out_dir = tmp_path / "out"
+    res_build = subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-m",
+            "pipelines.builders.build_audio_adhan_local",
+            "build",
+            "--sources-root",
+            str(sources_root),
+            "--output-dir",
+            str(out_dir),
+        ],
+        capture_output=True,
+    )
+    assert res_build.returncode == 1
+    stderr_text = res_build.stderr.decode("utf-8", errors="replace")
+    assert "sample_fajr.mp3" in stderr_text
+    assert not out_dir.exists()

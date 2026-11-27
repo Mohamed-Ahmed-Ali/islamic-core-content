@@ -421,17 +421,17 @@ def _measure_loudnorm(ffmpeg_path: Path, master_path: Path) -> dict[str, str]:
     return parsed
 
 
-def build_audio_adhan(sources_root: Path, output_dir: Path) -> None:
-    """Build deterministic Adhan audio assets."""
-    sources_root = Path(sources_root)
+def _build_adhan_assets(
+    raw_root: Path,
+    output_dir: Path,
+    sources: list[dict[str, Any]],
+    *,
+    ffmpeg_path: Path,
+    ffprobe_path: Path,
+) -> None:
+    """Build deterministic Adhan audio assets from sources inventory."""
+    raw_root = Path(raw_root)
     output_dir = Path(output_dir)
-
-    # 1. Pinned runtime verification before any writes
-    ffmpeg_path, ffprobe_path = verify_runtime()
-
-    # 2. License and locked inputs validation
-    lic_data = load_adhan_license(sources_root)
-    sources = lic_data["sources"]
 
     # 3. Check for preexisting output files before encoding
     for src in sources:
@@ -453,8 +453,7 @@ def build_audio_adhan(sources_root: Path, output_dir: Path) -> None:
             rel_path = src["path"]
             slug = src["slug"]
             clip_start_ms = src["clipStartMs"]
-            master_path = sources_root / "raw-inputs" / rel_path
-
+            master_path = raw_root / rel_path
             # A. Probe raw master
             _probe_raw_master(ffprobe_path, master_path)
 
@@ -612,6 +611,27 @@ def build_audio_adhan(sources_root: Path, output_dir: Path) -> None:
                 except OSError:
                     pass
             raise
+
+
+def build_audio_adhan(sources_root: Path, output_dir: Path) -> None:
+    """Build deterministic Adhan audio assets."""
+    sources_root = Path(sources_root)
+    output_dir = Path(output_dir)
+
+    # 1. Pinned runtime verification before any writes
+    ffmpeg_path, ffprobe_path = verify_runtime()
+
+    # 2. License and locked inputs validation
+    lic_data = load_adhan_license(sources_root)
+    sources = lic_data["sources"]
+
+    _build_adhan_assets(
+        sources_root / "raw-inputs",
+        output_dir,
+        sources,
+        ffmpeg_path=ffmpeg_path,
+        ffprobe_path=ffprobe_path,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

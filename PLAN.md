@@ -25,7 +25,7 @@
 
 ## 2. Raw Input Staging Guide (For Your Ongoing Collection)
 
-Only the paths below are builder inputs. A clean checkout contains neither `Contant/` nor `raw-inputs/`. For local staging, copy exactly the nine listed Tanzil XML basenames from `Contant/quran/` to `raw-inputs/tanzil/` without renaming. Copy `Contant/quran/quranic-corpus-morphology-0.4.zip` to `raw-inputs/corpus/` unchanged; use only its `quranic-corpus-morphology-0.4.txt` member, not the loose extraction. For QUL inputs, stage byte-for-byte from `Contant/qul/{wbw,tafsir,translation,mushaf,recitation}/` to `raw-inputs/qul/`, retaining relative directory structure and archive basenames. Do not glob, use other exports, or commit raw data.
+Only the paths below are builder inputs. A clean checkout contains neither `Contant/` nor `raw-inputs/`. For local staging, copy exactly the nine listed Tanzil XML basenames from `Contant/quran/` to `raw-inputs/tanzil/` without renaming. Copy `Contant/quran/quranic-corpus-morphology-0.4.zip` to `raw-inputs/corpus/` unchanged; use only its `quranic-corpus-morphology-0.4.txt` member, not the loose extraction. For QUL inputs, stage byte-for-byte from `Contant/qul/{wbw,tafsir,translation,mushaf,recitation}/` to `raw-inputs/qul/`, retaining relative directory structure and archive basenames. Do not glob, use other exports, or commit raw data. Private, local-only Adhan intake from `Contant/adhan/` is staged separately to `raw-inputs/audio/adhan-local/` via `pipelines.builders.build_audio_adhan_local stage`; it is isolated from the locked release inputs (see Task 3.7).
 
 For Phase 2, run `python -B -m pipelines.common.stage_hadith_inputs --content-root Contant --raw-root raw-inputs --book <slug>` for each book. This reads the selected JSON or CSV from the upstream trees under `Contant/hadith/`. `Contant/audit/malik_fill_verification.json` is a local audit record, not an input.
 
@@ -287,6 +287,22 @@ Unless qualified, builder section references below point to `ARCHITECTURE.md`. I
 
 ### Milestone `v0.3.1` — Global Adhan Expansion
 * [ ] **Task 3.7 (Global Adhan Expansion):** Add license-cleared Makkah, Madinah, Al-Aqsa, and Fajr Adhans to `audio-adhan-core`.
+  - **Private Local Intake & Derivatives (2026-11):** 25 user-supplied Adhan recordings in `Contant/adhan/` audited, pinned, and staged without public redistribution clearance:
+    - Inventory locked in `sources/adhan-local-intake.json` (`status: "pending"`, 25 tracks sorted by slug, 11 Fajr recordings, exact SHA-256 digests).
+    - Stage: `python -B -m pipelines.builders.build_audio_adhan_local stage --sources-root .` (stages to `raw-inputs/audio/adhan-local/` via temporary file streaming and atomic `os.link`).
+    - Build: `python -B -m pipelines.builders.build_audio_adhan_local build --sources-root . --output-dir dist/adhan-local/<name>` (produces 50 assets: 25 full AAC `.m4a` and 25 iOS notification `adpcm_ima_qt` `.caf` strictly $<29.0$s; reuses `_build_adhan_assets` from `pipelines/builders/build_audio_adhan.py`).
+    - Candidate and rebuild builds proved bit-for-bit identical across all 50 assets in pinned Linux container (`linux/amd64`, network disabled).
+    - Public release registry (`sources/registry.json`), catalog (`catalog/`), and release quality gate remain strictly isolated and unchanged. Task 3.7 checkbox remains open pending verified rights and geographic provenance.
+  - **Quran Asset Review & Disposition (`Contant/quran_content/`):**
+    - `joz2Soura.json`: Contains 135 `(juz, surah)` groups across all 30 Juz matching canonical start pages, but 65 groups have diverging verse boundaries (e.g. Juz 1 ending at `2:140` instead of `2:141`). **Rejected** from core packs; canonical navigation is already derivable from `quran-core.db` via:
+      ```sql
+      SELECT a.juz, a.surah_id, s.name_ar, MIN(a.ayah_number), MAX(a.ayah_number), MIN(a.page_madani)
+      FROM ayahs AS a JOIN surahs AS s ON s.id = a.surah_id
+      GROUP BY a.juz, a.surah_id ORDER BY a.juz, a.surah_id;
+      ```
+    - 114 Surah-name SVGs (765,384 bytes total): Presentation assets for calligraphic headers; candidate for downstream app asset integration (requires upstream rights verification; map by numeric Surah ID). Excluded from SQLite data packs.
+    - 604 QCF4 Mushaf fonts (166,987,028 bytes total): Page-specific Tajweed fonts with copyright-reserved notices; incompatible with existing QCF V2 Madani layout. Excluded from core.
+    - Fonts & Media: Noto Naskh Arabic (OFL) suitable for client-side rendering via upstream font; Almarai fonts duplicate each other byte-for-byte; compass, banner, tokenized Dailymotion playlist rejected. No Quran schema or pack changes.
 ---
 
 ### Phase 4: Milestone `v0.4.0` — Mashrūʿ Taqrīb as-Sunnah (Local Only)

@@ -1,0 +1,155 @@
+{
+  "status": "pending",
+  "tracks": [
+    {
+      "basename": "abdelrehemdwedar_fajr.mp3",
+      "reciter": "Abdel Rahim Dwedar",
+      "sha256": "b3734ed535fdc4061d15f5a4090d10e24d062e62a4c153aa4f1cda6ccc08972c",
+      "slug": "abdel-rahim-dwedar-fajr"
+    },
+    {
+      "basename": "abdelbasetabdelsamad_fajr.mp3",
+      "reciter": "Abdul Basit Abdul Samad",
+      "sha256": "75f7e883ddcb39545d234db38fb171aeb61eb26552070721b9b6fbcee592988d",
+      "slug": "abdul-basit-abdul-samad-fajr-local"
+    },
+    {
+      "basename": "abdelbasetabdelsamad.mp3",
+      "reciter": "Abdul Basit Abdul Samad",
+      "sha256": "087644b07a907c2c8956f6491ad28867d977d793f9c07208fb5b785761a34a92",
+      "slug": "abdul-basit-abdul-samad-local"
+    },
+    {
+      "basename": "ahmedmohamedaamer.mp3",
+      "reciter": "Ahmed Mohamed Aamer",
+      "sha256": "642c231eb8c15e1f5792e9038b2eba62511cd18424035562b13b65e60022592b",
+      "slug": "ahmed-mohamed-aamer"
+    },
+    {
+      "basename": "ahmedmohamedaamer_fajr.mp3",
+      "reciter": "Ahmed Mohamed Aamer",
+      "sha256": "ba893a2e03bbe6f36cba2bf9001aad248db349fdf2a28bb54ae88bb669c72853",
+      "slug": "ahmed-mohamed-aamer-fajr"
+    },
+    {
+      "basename": "ahmednaina.mp3",
+      "reciter": "Ahmed Naina",
+      "sha256": "5b688e0958ec61aa50eb720d1bf8c83f0f29030c5779c9b9583c22288139ca2f",
+      "slug": "ahmed-naina"
+    },
+    {
+      "basename": "ahmednaina_fajr.mp3",
+      "reciter": "Ahmed Naina",
+      "sha256": "5e3fb0cf8a5cf9cfda1d2a8228d19978f9f0399c5576c2ae3b5dee3a04247da8",
+      "slug": "ahmed-naina-fajr"
+    },
+    {
+      "basename": "alimahmoud.mp3",
+      "reciter": "Ali Mahmoud",
+      "sha256": "2a01dba8623ddf1484e67b31c3835577fb69aa2efa5ed231c38ac89dc6aacedb",
+      "slug": "ali-mahmoud"
+    },
+    {
+      "basename": "elshahtmohamedanwar.mp3",
+      "reciter": "Elshaht Mohamed Anwar",
+      "sha256": "eb9ccb36b8684f9b9c46d05ecf99ebd71666901f765ec5af7afbc4627d775bb1",
+      "slug": "elshaht-mohamed-anwar"
+    },
+    {
+      "basename": "elshahtmohamedanwar_fajr.mp3",
+      "reciter": "Elshaht Mohamed Anwar",
+      "sha256": "2d55eb621c8898c5d93c9140f4b99389357c207aff2bf52f98bedc7050b42aa3",
+      "slug": "elshaht-mohamed-anwar-fajr"
+    },
+    {
+      "basename": "mahmoudismailelshrif.mp3",
+      "reciter": "Mahmoud Ismail El Shrif",
+      "sha256": "b0f1dc3446bd2527882917e36f51ab3ae294cfef09652cb1fa60a96e067bdfd6",
+      "slug": "mahmoud-ismail-el-shrif"
+    },
+    {
+      "basename": "mahmoudismailelshrif_fajr.mp3",
+      "reciter": "Mahmoud Ismail El Shrif",
+      "sha256": "1630ca577831dcbcd83194040646fb73620bb3ce98d4046407769adc3ce011d6",
+      "slug": "mahmoud-ismail-el-shrif-fajr"
+    },
+    {
+      "basename": "mahmoudelhosary.mp3",
+      "reciter": "Mahmoud Khalil Al-Hussary",
+      "sha256": "1c84972a0199d4b2c58eb2f0d97270dae4d301cfcc8a92de554b69864335d892",
+      "slug": "mahmoud-khalil-al-hussary-local"
+    },
+    {
+      "basename": "mohamedabdelazizhosan.mp3",
+      "reciter": "Mohamed Abdel Aziz Hosan",
+      "sha256": "a0c8d68181a36fd1a3de9dd29a53b1bc065b6d34eea603257d3537468fdfcb78",
+      "slug": "mohamed-abdel-aziz-hosan"
+    },
+    {
+      "basename": "mohamedabdelazizhosan_fajr.mp3",
+      "reciter": "Mohamed Abdel Aziz Hosan",
+      "sha256": "b13cd369f7f35daf857b0bd237104f005e27cbbdaf4efac36e9f90a4d1a6cd5d",
+      "slug": "mohamed-abdel-aziz-hosan-fajr"
+    },
+    {
+      "basename": "mohamedomran.mp3",
+      "reciter": "Mohamed Omran",
+      "sha256": "06311eda4e0d16c22eeffc0746b6c7f9ef6de9b31a4ef0807554bd06990cb39f",
+      "slug": "mohamed-omran"
+    },
+    {
+      "basename": "mohamedomran_fajr.mp3",
+      "reciter": "Mohamed Omran",
+      "sha256": "a8ebb237fea9b1818851a55401e97fd19a112c6bd5a40f0dfeafdbfbb70b5a2c",
+      "slug": "mohamed-omran-fajr"
+    },
+    {
+      "basename": "mohamedrafat.mp3",
+      "reciter": "Mohamed Refaat",
+      "sha256": "8426f4eb313139ba391870d04c60581beb092a381985514c5fe9474080bb064f",
+      "slug": "mohamed-refaat-local"
+    },
+    {
+      "basename": "mohamedsedekelmenshawy.mp3",
+      "reciter": "Mohamed Sedek El Menshawy",
+      "sha256": "60decf74b29c3635944c8c8ea7a2cc665fa10893e6969864a4b20d0790b83456",
+      "slug": "mohamed-sedek-el-menshawy"
+    },
+    {
+      "basename": "nasreldentobar.mp3",
+      "reciter": "Nasr El Den Tobar",
+      "sha256": "447b8d2be2679e305ae451bbae661870c50371cfebc7712ee03943311abb9a47",
+      "slug": "nasr-el-den-tobar"
+    },
+    {
+      "basename": "nasreldentobar_fajr.mp3",
+      "reciter": "Nasr El Den Tobar",
+      "sha256": "9bca2d94bed710684a4e8c13160792cc9cdfc1f97d72b9e3f64521e559bb250f",
+      "slug": "nasr-el-den-tobar-fajr"
+    },
+    {
+      "basename": "sayedelnakshabandy.mp3",
+      "reciter": "Sayed El Nakshabandy",
+      "sha256": "bdc4dee4d87dc6be322bf40f5e9ac44594e53dc2cb0877055ee8e2d1e2c1e1d9",
+      "slug": "sayed-el-nakshabandy"
+    },
+    {
+      "basename": "sayedelnakshabandy_fajr.mp3",
+      "reciter": "Sayed El Nakshabandy",
+      "sha256": "5ed132ac4192139bd883002a3096c2a462e6e524cffe077ba4903eb3d0f6840d",
+      "slug": "sayed-el-nakshabandy-fajr"
+    },
+    {
+      "basename": "tahaelfeshny.mp3",
+      "reciter": "Taha El Feshny",
+      "sha256": "973bc87bb7ff755f2ee8cd0e593621742a287ccd458bf655752c244c0e3429cb",
+      "slug": "taha-el-feshny"
+    },
+    {
+      "basename": "tahaelfeshny_fajr.mp3",
+      "reciter": "Taha El Feshny",
+      "sha256": "927120256c0071efaf4c9ddbff797335cd1d07f73e9278194f9f481ac32bdf41",
+      "slug": "taha-el-feshny-fajr"
+    }
+  ]
+}
