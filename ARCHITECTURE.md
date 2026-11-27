@@ -30,7 +30,7 @@
 
 ## 2. Repository Structure
 
-Code, schemas, lockfiles, license records, and release manifests live in Git. Local inputs (`Contant/`, `raw-inputs/`), build output (`dist/`), workstation files, and database, archive, and audio packs are excluded by `.gitignore`. PR verification rejects tracked paths that match those rules. Publish built packs only as release assets after clearance.
+Code, schemas, lockfiles, license records, and candidate release manifests live in Git. Local inputs (`Contant/`, `raw-inputs/`), build output (`dist/`), workstation files, and database, archive, and audio packs are excluded by `.gitignore`. PR verification rejects tracked paths that match those rules. `Contant/` is an ignored, local-only staging directory used by staging commands; it is never read directly by artifact builders or used for CI acquisition. `Contant/quran_content/` is a separate legacy local review folder (see `PLAN.md` §2 for disposition), not a sixth import root. Publish built packs only as release assets after clearance.
 
 The tree shows the main interfaces, not every test or toolchain file; `PLAN.md` defines phase-local file scope.
 
@@ -39,9 +39,11 @@ islamic-core-content/
 ├── ARCHITECTURE.md
 ├── PLAN.md
 ├── LICENSE                             # Repo code license (MIT)
+├── pytest.ini                          # Scopes discovery strictly to tests/
 ├── specs/                              # Source of truth for all data contracts
 │   ├── catalog.schema.json
 │   ├── audio-manifest.schema.json
+│   ├── recitation-manifest.schema.json # Recitation timing manifest schema (Phase 3)
 │   ├── inputs/
 │   │   ├── hadith-input.schema.json    # Validation schema for raw Hadith JSONs
 │   │   └── tafsir-input.schema.json    # Validation schema for raw Tafsir JSONs
@@ -50,23 +52,27 @@ islamic-core-content/
 │       ├── quran_core.v1.sql
 │       ├── quran_scripts_extended.v1.sql
 │       ├── quran_translation.v1.sql
+│       ├── quran_translation_sahih.v1.sql
 │       ├── quran_tafsir.v1.sql
+│       ├── quran_mushaf.v1.sql
 │       ├── quran_morphology.v1.sql
 │       ├── quran_wbw.v1.sql
-│       └── hadith_book.v1.sql
+│       ├── hadith_book.v1.sql
+│       └── hadith_taqreeb_v1.sql
 ├── sources/                            # Provenance lockfiles & license registry (no raw dumps)
-│   ├── registry.json                   # Explicit pack membership and source identities
+│   ├── registry.json                   # Explicit pack membership and source identities (50 inputs)
 │   ├── manifest.lock.json              # Pinned source URLs, versions, and input SHA-256s
-│   └── licenses/                       # Per-pack redistribution & attribution metadata
+│   ├── adhan-local-intake.json         # Standalone inventory for private local Adhan masters
+│   └── licenses/                       # Per-pack redistribution & attribution metadata (36 records)
 │       ├── quran-core.json
-│       ├── quran-scripts-extended.json
-│       ├── quran-tr-en-pickthall.json
-│       ├── quran-tafsir-ar-jalalayn.json
-│       ├── quran-morphology.json
-│       ├── hadith-bukhari.json
-│       └── audio-adhan-core.json
+│       ├── ...
+│       └── hadith-taqreeb-wajeez.json
 ├── pipelines/                          # Python build & QA engine; reference runtime in §5
-│   ├── common/                         # SQLite determinism helpers, Buckwalter converter, hashing
+│   ├── common/                         # SQLite determinism helpers, search normalization, staging
+│   │   ├── search_text.py              # Shared Arabic FTS normalization & literal query match
+│   │   ├── stage_hadith_inputs.py      # Staging for canonical Hadith JSONs
+│   │   ├── stage_qul_inputs.py         # Staging for QUL WBW, Tafsir, Mushaf, Recitation
+│   │   └── stage_taqreeb_inputs.py     # Staging for Mashrūʿ Taqrīb Realm JSONs
 │   ├── builders/
 │   │   ├── build_quran_core.py
 │   │   ├── build_quran_scripts_extended.py
@@ -74,29 +80,33 @@ islamic-core-content/
 │   │   ├── build_quran_tafsir.py
 │   │   ├── build_quran_morphology.py   # Roots, Lemmas, Verb Concordance, Segments
 │   │   ├── build_quran_wbw.py          # QUL Word-by-Word meanings
-│   │   ├── build_hadith_book.py
-│   │   └── build_audio_adhan.py        # ffmpeg/ffprobe pipeline (.m4a + iOS .caf)
+│   │   ├── build_quran_mushaf.py       # Madani & IndoPak Mushaf layout packs
+│   │   ├── build_recitation_manifests.py # Recitation timing manifests
+│   │   ├── build_hadith_book.py        # Nine canonical Hadith books
+│   │   ├── hadith_taqreeb_builder.py   # Four Mashrūʿ Taqrīb packs
+│   │   ├── build_audio_adhan.py        # ffmpeg/ffprobe pipeline (.m4a + iOS .caf)
+│   │   └── build_audio_adhan_local.py  # Local private Adhan staging & builder
 │   ├── validators/
-│   │   └── quality_gate.py             # Profile- and pack-specific gate (§9)
+│   │   ├── quality_gate.py             # Profile- and pack-specific gate (§9)
+│   │   └── phase3_concordance.py       # Phase 3 ATTACH concordance validator
 │   └── release/
-│       └── generate_catalog.py         # Emits catalog.json & audio-manifest.json
-├── catalog/                            # Versioned release manifests committed to Git
+│       ├── build_phase3_local.py       # Deterministic Phase 3 local release orchestrator
+│       ├── release_packs.py            # Acquisition, clearance verification, and companion packager
+│       └── generate_catalog.py         # Emits v0.1.0 candidate catalog.json & audio-manifest.json
+├── catalog/                            # Versioned candidate release manifests committed to Git
 │   ├── catalog.json
 │   └── audio-manifest.json
-├── packages/                           # Optional developer tooling (Monorepo)
-│   ├── core-sdk/                       # TypeScript catalog parser & SHA-256 install contract
-│   └── expo-adapter/                   # (Phase 4) Optional Expo SQLite integration
-├── Contant/                            # GITIGNORED local import only; never a builder path
-│   ├── adhan/                          # Original Adhan audio
+├── Contant/                            # GITIGNORED local import only; never a builder/CI path
+│   ├── adhan/                          # Original Adhan audio masters
 │   ├── audit/                          # Local verification records (not builder inputs)
 │   ├── hadith/                         # Upstream Hadith repositories and archives
 │   ├── qul/                            # wbw/, tafsir/, translation/, mushaf/, recitation/
-│   └── quran/                          # Tanzil exports, Corpus archive, and other Quran inputs
+│   ├── quran/                          # Tanzil exports, Corpus archive, and other Quran inputs
+│   └── quran_content/                  # Legacy local review folder (see PLAN.md §2; not staged)
 ├── raw-inputs/                         # GITIGNORED local staging directory
 └── .github/workflows/
     ├── verify-pr.yml                   # Runs schema tests & quality gate on PRs
-    └── release-packs.yml               # Dual-build determinism check + GitHub Release publish
-
+    └── release-packs.yml               # Dual-build determinism check + release clearance
 ```
 
 ---
@@ -112,7 +122,7 @@ Reformatting upstream data into SQLite does **not** erase its original license o
 | **Tajweed, WBW, Mushaf Layouts, Extended Tafsirs, Audio Segments** | Quranic Universal Library — QUL (`qul.tarteel.ai`) | **JSON** (preferred over QUL's prebuilt SQLite to enforce our unified schema) | **Critical Rule:** QUL's GitHub `MIT` license covers its Ruby on Rails CMS software, **not** every dataset hosted on QUL. Individual translations, tafsirs, and recitations remain the property of their respective authors/publishers. Each QUL-sourced pack must undergo an individual license check before release. |
 | **Roots, Morphology & Verb Concordance** | Quranic Arabic Corpus v0.4 (`corpus.quran.com`) | **TSV (inside ZIP)** | Resolve both the Corpus GPL and the embedded Tanzil notices before shipping; isolate in `quran-morphology.db`. |
 | **Hadith Collections (AR + EN)** | Sunnah.com & audited collections | **JSON** for builders | Document edition, translator and redistribution terms per book in `sources/licenses/`. |
-| **Adhan Audio** | Six local masters in `PLAN.md` §2 | **MP3** to **M4A + CAF** | None of the six recordings is cleared; require rights and attribution evidence for each master and both derivatives. |
+| **Adhan Audio** | Two independent inventories: six Phase 1 candidate masters (`audio-adhan-core`, `PLAN.md` §2) and 25 private local intake masters (50 derivatives, `sources/adhan-local-intake.json`, `PLAN.md` §2/Task 3.7) | **MP3** to **M4A + CAF** | Neither inventory is cleared for public redistribution (`status: "pending"`). Require rights and attribution evidence for each master and both derivatives before release. |
 
 ### Input Format Standard
 
@@ -128,7 +138,7 @@ Reformatting upstream data into SQLite does **not** erase its original license o
 
 Paths use `/`, no empty, `.` or `..` components, and only ASCII alphanumerics plus `.`, `_`, `-` in each component. Reject absolute/drive paths, Windows device names and components ending in a dot, case collisions, symlinks or junctions at any component, and nonregular/missing files. Verify spelling by directory entry even on case-insensitive filesystems. Do not consume unlisted files. Verify size and hash.
 
-From the repository root, `python -m pipelines.common.lock_inputs --registry REGISTRY --raw-root RAW --output LOCK` authors the lock; adding `--verify` reads `LOCK` as the expected lock and exits nonzero on any mismatch without writing. CI uses verify only. The production registry/lock belong to Phase 1; Phase 0 uses temporary inputs and a synthetic registry.
+From the repository root, `python -m pipelines.common.lock_inputs --registry REGISTRY --raw-root RAW --output LOCK` authors the lock; adding `--verify` reads `LOCK` as the expected lock and exits nonzero on any mismatch without writing. CI uses verify only. The shared production registry and lock started in Phase 1 and include later phases (covering 50 locked inputs across Phases 1–4); the private Adhan intake has its own standalone inventory (`sources/adhan-local-intake.json`). Phase 0 uses temporary inputs and a synthetic registry.
 
 Verification optionally accepts `--pack PACK_ID` (only with `--verify`). Both routes use `verify_lock(registry_path: Path, raw_root: Path, lock_path: Path, *, pack_id: str | None = None) -> tuple[LockEntry, ...]` in `lock_inputs.py`. Always validate the entire registry/lock and their correspondence; with a pack selector, verify raw files and return entries only for that known pack, in lock order. Without it, verify and return all entries. `LockEntry` is the §3.1 v1 entry shape. Unknown pack, malformed inventory or mismatched selected bytes fail; no rewrite.
 
@@ -139,6 +149,8 @@ Each exact-case `sources/licenses/{id}.json` contains `packId`, `licenseSpdx` (a
 #7 checks that a reviewed release record is `approved`, names all locked sources, and permits this project's public redistribution (including commercial consumer use) and the transformations actually used. Require `sqlite_conversion` for SQLite, `search_projection` for packs with FTS or derived normalized text, and `transcode`, `clip`, `fade`, `loudness_normalization` for audio. Keep evidence and actual conditions in the tagged tree (no private credentials); a reviewer must resolve the rights before approving. A record's existence or a reachable URL alone is not approval.
 
 Fixture records have `status: "fixture"`, `reviewedBy: null`, `licenseSpdx: "CC0-1.0"`, `rightsEvidence: ["https://example.org/fixture/synthetic"]`, `notice` and `attribution` both `"Synthetic fixture"`, and `permittedUses: []`. #7 validates these literal fields, the same path/lock/provenance relationships and per-track metadata, but does not require a release approval or fetch fixture evidence.
+
+> **Current Rights & Clearance Baseline:** Exactly 36 tracked per-pack license records in `sources/licenses/` are currently `"status": "pending"` (6 Phase 1 + 9 canonical Hadith + 17 QUL + 4 Taqrīb); the separate `sources/adhan-local-intake.json` is also `"status": "pending"`, but is an intake inventory, not one of those 36 per-pack license files. Local quality gates accept pending provenance for offline verification, whereas the strict release workflow requires approved evidence. QUL Rails CMS software license (`MIT`) does not cover its hosted datasets; `quran-morphology.db` remains strictly isolated under `GPL-3.0`. No local gate pass, committed candidate manifests, or source hashes imply publication rights. The checked-in v0.1.0 candidate manifests predate the changed Arabic index bytes and do not prove a strict HEAD rebuild matches them.
 
 For morphology, preserve the two upstream notice blocks and resolve the terms of the embedded Quran text separately from [Corpus GPLv3](https://corpus.quran.com/license.jsp). If distribution of the DB or its corresponding source is not cleared under both notices, block v0.1.0. For equivalent access, attach `quran-morphology-source.zip` to the same release and link the tagged license record and archive hash next to the DB. Keep the archive out of Git.
 
@@ -156,7 +168,7 @@ The archive contains only the following root-relative members (brace lists enume
 
 ## 4. Modular Pack Architecture
 
-Data is split into granular, independently downloadable packs so apps only download what they need and licenses remain cleanly separated.
+Data is designed as granular, independently downloadable packs so apps only download what they need once cleared for release, keeping licenses cleanly separated. See [PLAN.md §1](PLAN.md#1-current-asset-readiness-audit) for the current milestone implementation and clearance status summary across all packs.
 
 | Pack ID | Format | Compression (v1) | Source | License Isolation |
 | --- | --- | --- | --- | --- |
@@ -169,13 +181,14 @@ Data is split into granular, independently downloadable packs so apps only downl
 | `quran-wbw-{lang}` | SQLite | `none` | QUL JSON | Audited per-pack |
 | `quran-mushaf-{layout}` | SQLite | `none` | QUL SQLite page lines + QPC Hafs Tajweed JSON | Audited per-pack |
 | `quran-morphology` | SQLite | `none` | Quranic Arabic Corpus 0.4 | `GPL-3.0` (isolated) |
-| `hadith-{book}` | SQLite | `none` | Sunnah.com JSON | Audited per-pack |
+| `hadith-{book}` | SQLite | `none` | Nine canonical editions (see `PLAN.md` §2: 7 Sunnah.com snapshots, Malik composite, Ahmad Open-Hadith-Data CSV) | Audited per-pack |
+| `hadith-taqreeb-{suffix}` | SQLite | `none` | Ṣāliḥ ash-Shāmī JSON | Pending; local only |
 | `audio-adhan-core` | M4A + CAF | Native audio | Six Adhan masters | None cleared for v0.1.0 |
 | `audio-recitation-{edition}` | JSON timing manifest | `none` | QUL ayah-by-ayah JSON | Pending; remote audio URLs only |
 
 Al-Qurtubi maps all 6,236 verses, including the two source-empty entries at `34:54` and `59:19`. It preserves the source HTML and reports `ar_present=6234` with partial completeness. Saheeh stores verse HTML and note bodies separately; its search index excludes footnote markers and note text.
 
-> **Compression Strategy:** Release v1 publishes uncompressed `.db` files for zero-friction direct download on all mobile runtimes. Optional `.db.gz` or `.zip` variants may be added in a later minor release once verified across Android and iOS extraction pipelines.
+> **Compression Strategy:** Post-clearance release v1 is designed to publish uncompressed `.db` files for zero-friction direct download on all mobile runtimes. Optional `.db.gz` or `.zip` variants may be added in a later minor release once verified across Android and iOS extraction pipelines.
 
 ---
 
@@ -249,14 +262,19 @@ The local QUL English WBW pack also records the number of removed terminal verse
 
 ## 6. Canonical Database Schemas (v1)
 
-Apply `specs/sql/common_meta.sql` then exactly one checked-in pack schema to a fresh file; do not reproduce DDL in application code. `ayahs_fts`, `translations_fts`, `tafsir_fts`, `word_translations_fts`, `hadiths_fts`, and `hadiths_full_fts` are the only FTS tables, in their respective packs. Extended scripts and morphology declare none. Set `pack_meta.fts5_enabled` to `'true'` and catalog `requiresFts5` to `true` exactly for packs with a declared FTS table. Check #3 verifies both against the actual schema; #4 verifies indexed contents.
+Apply `specs/sql/common_meta.sql` then exactly one checked-in pack schema to a fresh file; do not reproduce DDL in application code. `ayahs_fts`, `translations_fts`, `tafsir_fts`, `word_translations_fts`, `hadiths_fts`, and `hadiths_full_fts` are the only FTS tables, in their respective packs. Extended scripts, morphology, and both Mushaf layouts declare none. Set `pack_meta.fts5_enabled` to `'true'` and catalog `requiresFts5` to `true` exactly for packs with a declared FTS table. Check #3 verifies both against the actual schema; #4 verifies indexed contents.
 
-**Arabic FTS rule.** For the Arabic projections below and Arabic query literals, apply unified forgiving Arabic normalization (`normalize_arabic_search`):
+**Arabic FTS rule.** For all Arabic FTS search projections and client query literals, `pipelines/common/search_text.py` is authoritative (`normalize_arabic_search`):
 - **Letter foldings:** Fold exactly `أ` U+0623, `إ` U+0625, `آ` U+0622, and `ٱ` U+0671 → `ا` U+0627; `ى` U+0649 → `ي` U+064A; `ة` U+0629 → `ه` U+0647.
 - **Mark deletions:** Delete exactly code points U+0610–U+061A, U+0640, U+064B–U+065F, U+0670, U+06D6–U+06ED, U+0897–U+089F, U+08CA–U+08FF, U+10EC5, U+10EFA–U+10EFF, and presentation forms U+FE70–U+FE72, U+FE74, U+FE76–U+FE7F.
 - **Preserved characters:** Keep unlisted characters unchanged, including `ء`, `ؤ`, `ئ`, Persian `ی` U+06CC, whole-word ligatures, and non-Arabic combining marks.
-- **Projection-only boundary:** Do not apply Unicode decomposition (no NFC/NFKC), case change, whitespace change, or extra folding. Normalization applies strictly to search projections and client query literals; never modify persisted source text.
-- **Client query contract:** Normalize user literals via `arabic_match_literal` **before** quoting as FTS phrases (trim, double embedded `"`, and wrap in outer `"`) and binding to `MATCH ?`; empty normalization yields no search (`None`).
+- **Projection-only boundary:** Do not apply Unicode normalization (no NFC/NFKD/NFKC), case change, whitespace change, or extra folding. Normalization applies strictly to search projections and client query literals; never modify persisted source text (including HTML). Do not extend normalization to English text, WBW translation/transliteration, or the non-FTS morphology retained `word_ar_clean`.
+- **Target Arabic FTS indexes:**
+  - **Phase 1:** Quran core `ayahs_fts` (`ayahs.text_ar_search` projected from `text_simple_clean`) and Jalalayn `tafsir_fts` (`text` projected to `text_ar_search`);
+  - **Phase 2:** Canonical Hadith verified Matn in `hadiths_fts` (`arabic_matn_clean`) and unsplit Arabic in `hadiths_full_fts` (`arabic_full_clean`);
+  - **Phase 3:** Five Arabic QUL Tafsirs in `tafsir_fts` (`text_ar_search` after plain-text projection);
+  - **Phase 4:** Mashrūʿ Taqrīb `hadiths_fts` on `text_ar_search`.
+- **Client query contract:** Normalize user literals via `arabic_match_literal` **before** quoting as FTS phrases (trim, double embedded `"`, and wrap in outer `"`) and binding to `MATCH ?`; empty normalization yields no search (`None`). See §8 for consumer implementation details and examples.
 - **Tokenizer caveat:** SQLite's [`unicode61 remove_diacritics`](https://www.sqlite.org/fts5.html#unicode61_tokenizer) handles Latin-script diacritics, not Arabic. `رَبِّ` and `رب` must produce the same expected row IDs; the fixture's `كتب` query must return none.
 
 ### 6.1 `quran-core.db` (`specs/sql/quran_core.v1.sql`)
@@ -771,6 +789,14 @@ Encode from audio stream `0:a:0`, one channel with FFmpeg's standard mono mix an
 * Up to **1,000 assets** may be attached to a single release tag, with no documented total release size cap or public download bandwidth fee.
 * Large Quran recitation libraries are not uploaded to GitHub Releases. The closed v1 audio schema is Adhan-only; recitation timings have a separate local manifest contract.
 
+### 7.3.1 Private local Adhan intake inventory (`sources/adhan-local-intake.json`)
+
+The private local Adhan intake is separate from the shared production registry and lock. `sources/adhan-local-intake.json` tracks 25 local master MP3 files staged from `Contant/adhan/` to `raw-inputs/audio/adhan-local/` by `python -m pipelines.builders.build_audio_adhan_local stage`. It records local provenance and rights-review metadata for local-only verification; it is not a release clearance artifact.
+
+`python -m pipelines.builders.build_audio_adhan_local build --sources-root S --output-dir O` builds exactly 50 derivatives from those 25 masters: one full M4A (`adhan-{slug}-full.m4a`) plus one iOS CAF (`adhan-{slug}-ios-notif.caf`) per slug. Derivatives must satisfy the same codec/sample-rate/duration/probe rules as §7.2, and local quality gates verify deterministic bytes across independent builds.
+
+Because this intake is private and rights remain pending, none of these local-only tracks or derivatives are included in release profiles, release manifests, or public uploads.
+
 Use the tag, dual-build, draft and public verification sequence in `PLAN.md` Task 1.7. Commit the canonical manifests with the reviewed lock and license records before tagging; compare both tagged rebuilds to those bytes and gate both before any upload. Validate draft attachments, then publish and recheck public URLs.
 
 ### Local recitation timing manifests (Phase 3)
@@ -794,7 +820,16 @@ Consuming apps must never mutate content `.db` files; user state lives in a sepa
 ## 8. Cross-Platform SQLite & FTS5 Compatibility
 
 * **Expo / React Native:** `expo-sqlite` supports pre-bundled databases (`assetSource`), local file-system databases, and FTS5 via `enableFTS: true` in app config.
-* **Other Platforms (Flutter, Native iOS/Android, Desktop, Web):** Consumers of SQLite records with `requiresFts5: true` need a SQLite runtime with FTS5. Check by opening the actual pack read-only and exercising the advertised index; a SQLite version string alone is not a capability check.
+* **Other Platforms (Flutter, Native iOS/Android, Desktop, Web):** Consumers of SQLite packs with `requiresFts5: true` need a SQLite runtime with FTS5. Verify by opening the actual pack read-only and executing the advertised FTS index query path; a SQLite version string alone is not a capability check.
+* **Mandatory cross-client literal contract:** Query literals for Arabic FTS must match `pipelines/common/search_text.py` exactly: apply `normalize_arabic_search`, trim Unicode whitespace, return no query when the result is empty, otherwise escape embedded `"` as `""`, wrap in outer `"..."`, and bind to `MATCH ?`.
+* **Reference examples (all clients must match):**
+
+| User input | Bound literal |
+| --- | --- |
+| `رَبِّ العالمين` | `"رب العالمين"` |
+| `رب العالمين` | `"رب العالمين"` |
+| `كتب` (fixture negative) | `"كتب"` |
+| marks-only / blank | `None` (skip query) |
 
 ---
 
@@ -823,7 +858,7 @@ Run in this order, failing fast at the first offending asset in lexical path ord
 | `v0.1.0` (Phase 1) | #1–#7 and #9 as applicable to all five SQLite packs and both variants of each of the six tracks. #8 is not applicable: no QUL WBW pack. No partial coverage or missing item permitted. |
 | `hadith-pilot` (Local only) | Flat DB-only roots for `hadith-bukhari.db` and `hadith-muslim.db`. Verifies canonical lock, pending licenses ('Clearance pending (local verification only)'), SQLite schema, keys, text, coverage, dual FTS token coverage and queries, and cross-root byte equality. Manifest checks and #8/#9 not applicable. |
 | `hadith-local` (Local only) | Flat DB-only roots for all nine Hadith packs (`bukhari`, `muslim`, `nasai`, `abudawud`, `tirmidhi`, `ibnmajah`, `malik`, `darimi`, `ahmad`). Same local checks across the entire nine-pack inventory. |
-| `phase3-local` (Local only) | Exactly 12 SQLite packs and seven recitation timing manifests from `pipelines.release.build_phase3_local`, with no catalog or audio files. Reconciles both roots against locked sources, applies #8 and #9, and checks all 19 sizes and SHA-256 digests. Passing this profile does not clear redistribution rights. |
+| `phase3-local` (Local only) | Exactly 12 SQLite packs and seven recitation timing manifests from `pipelines.release.build_phase3_local`: rebuilt `quran-core.db` and `quran-morphology.db` plus 10 QUL SQLite packs (2 translations, 5 tafsirs, 2 mushaf layouts, 1 WBW), with no catalog or audio files. Reconciles both roots against locked sources, applies #8 and #9, and checks all 19 sizes and SHA-256 digests. Passing this profile does not clear redistribution rights. |
 | `hadith-taqreeb-local` (Phase 4, local only) | Flat DB-only roots for the four Taqreeb packs (`hadith-taqreeb-jami.db`, `hadith-taqreeb-maalim.db`, `hadith-taqreeb-wajeez.db`, `hadith-taqreeb-kulliyyah.db`). Verifies canonical lock, pending licenses ('Clearance pending (local verification only)'), SQLite schema, source fidelity and row-by-row traversal against original Realm JSON exports, exact anomaly preservation, coverage metrics, FTS5 token search and integrity, and cross-root byte equality. Manifest checks and #8/#9 not applicable. |
 
 Build and verify the Phase 3 roots in the pinned Linux runtime, with networking disabled:
