@@ -299,6 +299,14 @@ Unless qualified, builder section references below point to `ARCHITECTURE.md`. I
 
 ---
 
+### Milestone `v0.4.1` — Unified Forgiving Arabic Search Normalizer & Pytest Discovery Fix (Phases 1–4, local only)
+* [x] **Task 4.5 (Pytest Discovery):** Restrict discovery to `tests/` and ignore unindexed directories.
+* [ ] **Task 4.6 (Search Normalizer):** Define shared Arabic FTS normalization contract and tests.
+* [ ] **Task 4.7 (Builder Integration):** Wire forgiving normalizer across Phases 1–4 builders and gates.
+* [ ] **Task 4.8 (Verification):** Prove bit-for-bit reproducibility and concordance performance.
+
+---
+
 ### Milestone `v1.0.0` — Developer SDK & First Consumer Integration
 **Objective:** Make integration effortless for your React Native / Expo app and external TypeScript developers without coupling the data repo to any app.
 * [ ] **Task SDK.1 (`packages/core-sdk`):** Build a zero-UI TypeScript package providing:
