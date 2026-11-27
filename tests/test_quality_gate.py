@@ -316,6 +316,40 @@ class TestQualityGateDoD:
         assert exit_code == 1
         assert "check 2" in output.lower() or "#2" in output
 
+    def test_mutation_check2_search_projection_drift(self, fixture_setup: dict[str, Path]) -> None:
+        """Check #2: Search projection drift using old mark-only literal fails Check #2."""
+        core_db = fixture_setup["candidate"] / "quran-core.db"
+        conn = sqlite3.connect(core_db)
+        # Verify row 1 display bytes are intact
+        orig_simple_bytes = conn.execute("SELECT CAST(text_simple_clean AS BLOB) FROM ayahs WHERE id = 1;").fetchone()[0]
+        # Mutate text_ar_search to the old mark-only literal
+        old_projection = "بسم الله رب الرحيم أحـمد على صلاة رب"
+        conn.execute("UPDATE ayahs SET text_ar_search = ? WHERE id = 1;", [old_projection])
+        conn.execute("INSERT INTO ayahs_fts(ayahs_fts) VALUES('rebuild');")
+        conn.commit()
+        # Verify display bytes were preserved exactly
+        post_simple_bytes = conn.execute("SELECT CAST(text_simple_clean AS BLOB) FROM ayahs WHERE id = 1;").fetchone()[0]
+        assert orig_simple_bytes == post_simple_bytes
+        conn.close()
+
+        _update_manifest_asset(
+            fixture_setup["candidate"] / "catalog.json",
+            "quran-core.db",
+            core_db.stat().st_size,
+            _recompute_sha256(core_db),
+        )
+
+        exit_code, stdout, stderr = run_quality_gate(
+            candidate=fixture_setup["candidate"],
+            rebuild=fixture_setup["rebuild"],
+            sources_root=fixture_setup["source"],
+            expectations=EXPECTATIONS_PATH,
+        )
+        output = stdout + "\n" + stderr
+        assert exit_code == 1
+        assert "check 2" in output.lower() or "#2" in output
+        assert "text_ar_search" in output
+
     def test_mutation_check3_invalid_db_schema_or_foreign_key(self, fixture_setup: dict[str, Path]) -> None:
         """Check #3: Invalid DB schema or foreign key violation."""
         hadith_db = fixture_setup["candidate"] / "hadith-fixture.db"

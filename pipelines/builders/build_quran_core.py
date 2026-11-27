@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 
 from pipelines.common.quran_pack import load_quran_pack, write_quran_pack
-from pipelines.common.search_text import normalize_arabic
+from pipelines.common.search_text import normalize_arabic_search
 from pipelines.common.tanzil_coordinates import (
     load_tanzil_coordinates,
     load_tanzil_text,
@@ -76,7 +76,7 @@ def build_quran_core(sources_root: Path, output_dir: Path) -> None:
                     aid = coords.ayah_ids[vkey]
                     t_uth = uthmani_text[vkey]
                     t_clean = clean_text[vkey]
-                    t_search = normalize_arabic(t_clean)
+                    t_search = normalize_arabic_search(t_clean)
                     juz, hizb, manzil, ruku, page = coords.boundaries[aid]
                     sajda = coords.sajdah_types.get(aid)
                     yield (

@@ -16,7 +16,7 @@ from pipelines.common.pack_sources import (
     _is_symlink_or_junction,
     load_sqlite_source_metadata,
 )
-from pipelines.common.search_text import normalize_arabic
+from pipelines.common.search_text import normalize_arabic_search
 from pipelines.common.sqlite_utils import (
     finalize_pack,
     open_pack,
@@ -186,12 +186,12 @@ def build_hadith_book(book: str, sources_root: Path, output_dir: Path) -> None:
             ar_full = h.get("arabicFull")
 
             ar_matn_clean = (
-                normalize_arabic(ar_matn)
+                normalize_arabic_search(ar_matn)
                 if (split_mode == "source_verified" and ar_matn is not None)
                 else None
             )
             ar_full_clean = (
-                normalize_arabic(ar_full)
+                normalize_arabic_search(ar_full)
                 if (split_mode == "unsplit_raw" and ar_full is not None)
                 else None
             )

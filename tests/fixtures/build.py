@@ -435,7 +435,11 @@ def populate_pack_tables(
     Applies row transformation only for core, morph, Tafsir, and Hadith.
     Sorts all rows by primary key in ascending order (after reversing if reverse_order=True).
     """
-    from pipelines.common.search_text import normalize_arabic, project_tafsir_text
+    from pipelines.common.search_text import (
+        normalize_arabic_search,
+        project_tafsir_text,
+        strip_arabic_marks,
+    )
 
     def _order_and_sort(rows: list[dict[str, Any]], pk_key: str = "id") -> list[dict[str, Any]]:
         copied = list(rows)
@@ -461,7 +465,7 @@ def populate_pack_tables(
             (
                 a["id"], a["surah_id"], a["ayah_number"], a["verse_key"],
                 a["text_uthmani"], a["text_simple_clean"],
-                normalize_arabic(a["text_simple_clean"]),
+                normalize_arabic_search(a["text_simple_clean"]),
                 a["juz"], a["hizb_quarter"], a["manzil"], a["ruku"],
                 a["page_madani"], a["sajdah_type"],
             )
@@ -565,7 +569,7 @@ def populate_pack_tables(
             (
                 r["id"], r["ayah_id"], r["surah_id"], r["ayah_number"],
                 r["word_number"], r["word_key"], r["word_ar_uthmani"],
-                normalize_arabic(r["word_ar_uthmani"]),
+                strip_arabic_marks(r["word_ar_uthmani"]),
                 r["primary_pos"], r["is_verb"], r["root_id"], r["lemma_id"],
                 r["verb_concordance_id"], r["verb_form"], r["verb_tense"],
                 r["verb_voice"],
@@ -617,8 +621,8 @@ def populate_pack_tables(
             split_mode = h["textSplitMode"]
             ar_sanad = h["arabicSanad"]
             ar_matn = h["arabicMatn"]
-            ar_matn_clean = normalize_arabic(ar_matn) if (split_mode == "source_verified" and ar_matn) else None
-            ar_full_clean = normalize_arabic(h["arabicFull"]) if (split_mode == "unsplit_raw" and h["arabicFull"]) else None
+            ar_matn_clean = normalize_arabic_search(ar_matn) if (split_mode == "source_verified" and ar_matn) else None
+            ar_full_clean = normalize_arabic_search(h["arabicFull"]) if (split_mode == "unsplit_raw" and h["arabicFull"]) else None
             hadith_rows.append((
                 h["id"], h["bookId"], h["chapterId"], h["hadithNumber"], h["urn"],
                 h["arabicFull"], h["englishFull"], split_mode, ar_sanad, ar_matn,

@@ -34,7 +34,13 @@ from pipelines.common.lock_inputs import (
     verify_lock,
     _is_symlink_or_junction,
 )
-from pipelines.common.search_text import normalize_arabic, project_tafsir_text
+from pipelines.common.search_text import (
+    arabic_match_literal,
+    normalize_arabic_search,
+    project_tafsir_text,
+    strip_arabic_marks,
+    tafsir_plain_text,
+)
 from pipelines.common.tanzil_coordinates import load_tanzil_coordinates, load_tanzil_text
 from pipelines.builders.build_audio_adhan import NAME_MAP, RECITER_MAP, SLUG_MAP
 from pipelines.builders.build_quran_morphology import read_corpus_segments
@@ -200,8 +206,6 @@ _PACK_FTS_MAP: dict[str, tuple[str, ...]] = {
     "quran-mushaf-indopak-15": (),
 }
 
-_ARABIC_CHAR_RE = re.compile(r"[\u0600-\u06FF]")
-_ARABIC_FTS_TABLES = frozenset({"ayahs_fts", "tafsir_fts", "hadiths_fts", "hadiths_full_fts"})
 _EXPECTED_COVERAGE_METRICS: dict[str, set[str]] = {
     "quran-core": {"expected_total", "ar_present"},
     "quran-scripts-extended": {"expected_total", "ar_present"},
@@ -217,54 +221,63 @@ _HADITH_LOCAL_ORACLE: dict[str, dict[str, Any]] = {
     "bukhari": {
         "id": 1,
         "ar_literal": "حَدَّثَنَا الْحُمَيْدِيُّ",
+        "ar_keyboard": "حدثنا الحميدي",
         "en_literal": "I heard",
         "expected_counts": (7277, 7277, 7276, 1, 7276),
     },
     "muslim": {
         "id": 7278,
         "ar_literal": "حَدَّثَنِي أَبُو خَيْثَمَةَ",
+        "ar_keyboard": "حدثني ابو خيثمه",
         "en_literal": "Should it so happen",
         "expected_counts": (7459, 7459, 7458, 1, 7458),
     },
     "nasai": {
         "id": 14737,
         "ar_literal": "أَخْبَرَنَا قُتَيْبَةُ",
+        "ar_keyboard": "اخبرنا قتيبه",
         "en_literal": "When any one of",
         "expected_counts": (5768, 5768, 5768, 0, 5768),
     },
     "abudawud": {
         "id": 20505,
         "ar_literal": "حَدَّثَنَا عَبْدُ اللَّهِ",
+        "ar_keyboard": "حدثنا عبد الله",
         "en_literal": "When the Prophet",
         "expected_counts": (5276, 5276, 5276, 0, 5276),
     },
     "tirmidhi": {
         "id": 25781,
         "ar_literal": "حَدَّثَنَا قُتَيْبَةُ",
+        "ar_keyboard": "حدثنا قتيبه",
         "en_literal": "the Prophet said",
         "expected_counts": (4053, 4053, 4052, 1, 4052),
     },
     "ibnmajah": {
         "id": 29834,
         "ar_literal": "حَدَّثَنَا أَبُو بَكْرِ",
+        "ar_keyboard": "حدثنا ابو بكر",
         "en_literal": "The Messenger of Allah",
         "expected_counts": (4345, 4345, 4345, 0, 4345),
     },
     "malik": {
         "id": 34179,
         "ar_literal": "قَالَ حَدَّثَنِي يَحْيَى",
+        "ar_keyboard": "قال حدثني يحيي",
         "en_literal": "He said",
         "expected_counts": (1985, 1985, 1985, 0, 1985),
     },
     "darimi": {
         "id": 37538,
         "ar_literal": "أَخْبَرَنَا عَلِيُّ",
+        "ar_keyboard": "اخبرنا علي",
         "en_literal": "none",
         "expected_counts": (3406, 3406, 0, 3406, 0),
     },
     "ahmad": {
         "id": 1,
         "ar_literal": "عَبْدُ اللَّهِ بْنُ نُمَيْرٍ",
+        "ar_keyboard": "عبد الله بن نمير",
         "en_literal": "none",
         "expected_counts": (26363, 26363, 0, 26363, 0),
     },
@@ -2095,7 +2108,7 @@ def _stage_8_text_equivalence_v010_pack(
                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_uthmani mismatch at {vk}")
             if c_t != clean_text[vk]:
                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_simple_clean mismatch at {vk}")
-            if s_t != normalize_arabic(c_t):
+            if s_t != normalize_arabic_search(c_t):
                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"text_ar_search mismatch at {vk}")
 
     elif pack_id == "quran-scripts-extended":
@@ -2167,7 +2180,7 @@ def _stage_8_text_equivalence_v010_pack(
         for (s_id, a_id, w_num), seg_iter in itertools.groupby(parsed_segments, key=lambda s: (s.surah, s.ayah, s.word)):
             segs = list(seg_iter)
             uthmani = "".join(s.form_ar for s in segs)
-            clean = normalize_arabic(uthmani)
+            clean = strip_arabic_marks(uthmani)
             wk = f"{s_id}:{a_id}:{w_num}"
             expected_words_text.append((wk, uthmani, clean))
 
@@ -2280,7 +2293,7 @@ def _verify_hadith_db_text_and_source(
         if split_mode == "unsplit_raw":
             if ar_sanad is not None or ar_matn is not None or ar_matn_clean is not None:
                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"Unsplit Hadith record {h_id} must have NULL split fields")
-            exp_clean = normalize_arabic(ar_full) if ar_full is not None else None
+            exp_clean = normalize_arabic_search(ar_full) if ar_full is not None else None
             if ar_full_clean != exp_clean:
                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_full_clean search projection mismatch for Hadith {h_id}")
         elif split_mode == "source_verified":
@@ -2294,7 +2307,7 @@ def _verify_hadith_db_text_and_source(
                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_sanad mismatch for Hadith {h_id}")
             if ar_matn != split_ev.get("arabicMatn") or ar_matn != raw_h.get("arabicMatn"):
                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_matn mismatch for Hadith {h_id}")
-            if normalize_arabic(ar_matn) != ar_matn_clean:
+            if normalize_arabic_search(ar_matn) != ar_matn_clean:
                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"arabic_matn_clean search projection mismatch for Hadith {h_id}")
 
     _verify_table_rows_by_pk(
@@ -2454,6 +2467,8 @@ def stage_8_text_equivalence(ctx: GateContext) -> None:
                             if notnull and not decoded.strip():
                                 if tbl == "morphology_segments" and col_name in ("form_buckwalter", "form_ar"):
                                     continue
+                                if (tbl, col_name) in (("ayahs", "text_ar_search"), ("tafsir_entries", "text_search")):
+                                    continue
                                 raise GateCheckError(2, f"{root_label}/{db_fn}", f"Empty text in NOT NULL column {tbl}.{col_name} at rowid {row_id}")
 
                 if ctx.profile == "v0.1.0":
@@ -2470,7 +2485,7 @@ def stage_8_text_equivalence(ctx: GateContext) -> None:
                         cur, "ayahs",
                         ["id", "surah_id", "ayah_number", "verse_key", "text_uthmani", "text_simple_clean", "text_ar_search", "juz", "hizb_quarter", "manzil", "ruku", "page_madani", "sajdah_type"],
                         "id", core_json["ayahs"], root_label, db_fn,
-                        projections={"text_ar_search": lambda r: normalize_arabic(r["text_simple_clean"])}
+                        projections={"text_ar_search": lambda r: normalize_arabic_search(r["text_simple_clean"])}
                     )
                 elif pack_id == "quran-scripts-extended":
                     ext_json = load_locked_json(ctx, "sqlite/quran-scripts-extended.json")
@@ -2511,7 +2526,7 @@ def stage_8_text_equivalence(ctx: GateContext) -> None:
                          "word_ar_uthmani", "word_ar_clean", "primary_pos", "is_verb",
                          "root_id", "lemma_id", "verb_concordance_id", "verb_form", "verb_tense", "verb_voice"],
                         "id", morph_json["words"], root_label, db_fn,
-                        projections={"word_ar_clean": lambda r: normalize_arabic(r["word_ar_uthmani"])}
+                        projections={"word_ar_clean": lambda r: strip_arabic_marks(r["word_ar_uthmani"])}
                     )
                     _verify_table_rows_by_pk(cur, "roots",
                         ["id", "root_buckwalter", "root_ar", "root_ar_spaced", "total_occurrences",
@@ -2652,7 +2667,7 @@ def stage_9_coverage(ctx: GateContext) -> None:
                     avail = en_cnt
                 elif pack_id in ("quran-tafsir-ar-fixture", "quran-tafsir-ar-jalalayn"):
                     cur.execute(
-                        "SELECT e.text, e.text_format "
+                        "SELECT e.text, e.text_format, e.text_search "
                         "FROM tafsir_ayah_map m "
                         "JOIN tafsir_entries e ON m.entry_id = e.id "
                         "ORDER BY m.ayah_id;"
@@ -2661,11 +2676,16 @@ def stage_9_coverage(ctx: GateContext) -> None:
                     tot = len(ctx.get_tanzil_coordinates().ayah_ids) if ctx.profile == "v0.1.0" else len(rows)
                     ar_cnt = 0
                     for r in rows:
-                        raw_t = r[0].decode("utf-8") if isinstance(r[0], bytes) else str(r[0])
-                        fmt = r[1].decode("utf-8") if isinstance(r[1], bytes) else str(r[1])
-                        plain = project_tafsir_text(raw_t, text_format=fmt, language="ar")
-                        if plain.strip():
+                        search_t = r[2].decode("utf-8") if isinstance(r[2], bytes) else str(r[2])
+                        if search_t.strip():
                             ar_cnt += 1
+                        else:
+                            raw_t = r[0].decode("utf-8") if isinstance(r[0], bytes) else str(r[0])
+                            fmt = r[1].decode("utf-8") if isinstance(r[1], bytes) else str(r[1])
+                            legacy_plain = tafsir_plain_text(raw_t, text_format=fmt)
+                            legacy_text = strip_arabic_marks(legacy_plain)
+                            if legacy_text.strip():
+                                ar_cnt += 1
                     computed_coverage = {"expected_total": tot, "ar_present": ar_cnt}
                     avail = ar_cnt
                 elif pack_id == "quran-morphology":
@@ -2811,12 +2831,25 @@ def _run_fts_hadith_local(ctx: GateContext, root_label: str, db_fn: str, db_path
         # Token coverage checks using fts5vocab
         cur.execute("CREATE VIRTUAL TABLE temp.vocab_full USING fts5vocab(main, 'hadiths_full_fts', 'instance');")
         doc_set_full = {r[0] for r in cur.execute("SELECT DISTINCT doc FROM temp.vocab_full;").fetchall()}
-        cur.execute("DROP TABLE temp.vocab_full;")
 
         cur.execute("SELECT id FROM hadiths WHERE arabic_full IS NOT NULL;")
         exp_ar_docs = {r[0] for r in cur.fetchall()}
         if doc_set_full != exp_ar_docs:
             raise GateCheckError(4, f"{root_label}/{db_fn}", f"fts5vocab hadiths_full_fts doc coverage mismatch: {len(doc_set_full)} vs {len(exp_ar_docs)}")
+
+        row_id = oracle["id"]
+        ar_literal = oracle["ar_literal"]
+        ar_keyboard = oracle["ar_keyboard"]
+        en_literal = oracle["en_literal"]
+
+        last_tok = ar_keyboard.split()[-1]
+        tok_cnt = cur.execute(
+            "SELECT count(*) FROM temp.vocab_full WHERE term = ? AND doc = ?;",
+            (last_tok, row_id),
+        ).fetchone()[0]
+        if tok_cnt < 1:
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Token {last_tok!r} missing from hadiths_full_fts vocab for doc {row_id}")
+        cur.execute("DROP TABLE temp.vocab_full;")
 
         cur.execute("CREATE VIRTUAL TABLE temp.vocab_primary USING fts5vocab(main, 'hadiths_fts', 'instance');")
         doc_set_en = {r[0] for r in cur.execute("SELECT DISTINCT doc FROM temp.vocab_primary WHERE col = 'english_body';").fetchall()}
@@ -2828,31 +2861,29 @@ def _run_fts_hadith_local(ctx: GateContext, root_label: str, db_fn: str, db_path
             raise GateCheckError(4, f"{root_label}/{db_fn}", f"fts5vocab hadiths_fts english_body doc coverage mismatch: {len(doc_set_en)} vs {len(exp_en_docs)}")
 
         # Smoke queries
-        row_id = oracle["id"]
-        ar_literal = oracle["ar_literal"]
-        en_literal = oracle["en_literal"]
-
         # 1. Secondary index: diacritized Arabic (normalized before quoting)
-        ar_esc1 = normalize_arabic(ar_literal).replace('"', '""')
-        q1 = f'"{ar_esc1}"'
+        q1 = arabic_match_literal(ar_literal)
+        if q1 is None:
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"ar_literal normalized to None for {slug}")
         cur.execute("SELECT rowid FROM hadiths_full_fts WHERE hadiths_full_fts MATCH ? AND rowid = ? ORDER BY rowid;", (q1, row_id))
         if [r[0] for r in cur.fetchall()] != [row_id]:
             raise GateCheckError(4, f"{root_label}/{db_fn}", f"Secondary FTS diacritized Arabic query failed for {slug}")
 
-        # 2. Secondary index: normalized Arabic
-        norm_ar = normalize_arabic(ar_literal)
-        ar_esc2 = normalize_arabic(norm_ar).replace('"', '""')
-        q2 = f'"{ar_esc2}"'
+        # 2. Secondary index: keyboard Arabic
+        q2 = arabic_match_literal(ar_keyboard)
+        if q2 is None:
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"ar_keyboard normalized to None for {slug}")
         cur.execute("SELECT rowid FROM hadiths_full_fts WHERE hadiths_full_fts MATCH ? AND rowid = ? ORDER BY rowid;", (q2, row_id))
         if [r[0] for r in cur.fetchall()] != [row_id]:
-            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Secondary FTS normalized Arabic query failed for {slug}")
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Secondary FTS keyboard Arabic query failed for {slug}")
 
         # 3. Primary index: query same Arabic on arabic_matn_clean -> expect 0 rows
-        q_matn = f'arabic_matn_clean : "{ar_esc1}"'
-        cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ? AND rowid = ? ORDER BY rowid;", (q_matn, row_id))
+        cur.execute("SELECT rowid FROM hadiths_fts WHERE arabic_matn_clean MATCH ? AND rowid = ? ORDER BY rowid;", (q1, row_id))
         if cur.fetchall():
             raise GateCheckError(4, f"{root_label}/{db_fn}", f"Primary FTS arabic_matn_clean unexpectedly matched unsplit Arabic for {slug}")
-
+        cur.execute("SELECT rowid FROM hadiths_fts WHERE arabic_matn_clean MATCH ? AND rowid = ? ORDER BY rowid;", (q2, row_id))
+        if cur.fetchall():
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Primary FTS arabic_matn_clean unexpectedly matched keyboard Arabic for {slug}")
         # 4. Primary index: query listed English phrase on english_body
         if en_literal != "none":
             en_esc = en_literal.replace('"', '""')
@@ -2921,17 +2952,33 @@ def stage_10_fts(ctx: GateContext) -> None:
                         query_str = q_spec["query"]
                         expected_row_ids = q_spec["rowIds"]
 
-                        effective_query = query_str
-                        if tbl in _ARABIC_FTS_TABLES and _ARABIC_CHAR_RE.search(query_str):
-                            effective_query = normalize_arabic(query_str)
-
-                        if not effective_query.strip():
-                            actual_row_ids: list[int] = []
+                        if tbl in ("translations_fts", "word_translations_fts"):
+                            s = query_str.strip()
+                            if not s:
+                                actual_row_ids = []
+                            else:
+                                quoted_phrase = f'"{s.replace("\"", "\"\"")}"'
+                                cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? ORDER BY rowid;", (quoted_phrase,))
+                                actual_row_ids = [r[0] for r in cur.fetchall()]
+                        elif tbl == "hadiths_fts":
+                            ar_match = arabic_match_literal(query_str)
+                            s = query_str.strip()
+                            en_match = f'"{s.replace("\"", "\"\"")}"' if s else None
+                            ids: set[int] = set()
+                            if ar_match is not None:
+                                for r in cur.execute("SELECT rowid FROM hadiths_fts WHERE arabic_matn_clean MATCH ? ORDER BY rowid;", (ar_match,)).fetchall():
+                                    ids.add(r[0])
+                            if en_match is not None:
+                                for r in cur.execute("SELECT rowid FROM hadiths_fts WHERE english_body MATCH ? ORDER BY rowid;", (en_match,)).fetchall():
+                                    ids.add(r[0])
+                            actual_row_ids = sorted(ids)
                         else:
-                            escaped_query = effective_query.replace('"', '""')
-                            quoted_phrase = f'"{escaped_query}"'
-                            cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? ORDER BY rowid;", [quoted_phrase])
-                            actual_row_ids = [r[0] for r in cur.fetchall()]
+                            match_lit = arabic_match_literal(query_str)
+                            if match_lit is None:
+                                actual_row_ids = []
+                            else:
+                                cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? ORDER BY rowid;", (match_lit,))
+                                actual_row_ids = [r[0] for r in cur.fetchall()]
 
                         if actual_row_ids != expected_row_ids:
                             raise GateCheckError(
@@ -2949,12 +2996,16 @@ def _run_fts_queries_v010(ctx: GateContext, root_label: str, db_fn: str, db_path
         queries = [
             ("ayahs_fts", "رَبِّ العالمين", [2]),
             ("ayahs_fts", "رب العالمين", [2]),
+            ("ayahs_fts", "أَحْمَد", [5169]),
+            ("ayahs_fts", "احمد", [5169]),
             ("ayahs_fts", "zzzzfixturemissing", []),
         ]
     elif pack_id == "quran-tafsir-ar-jalalayn":
         queries = [
             ("tafsir_fts", "رَبِّ العالمين", [2]),
             ("tafsir_fts", "رب العالمين", [2]),
+            ("tafsir_fts", "أَحْمَد", [5169]),
+            ("tafsir_fts", "احمد", [5169]),
             ("tafsir_fts", "zzzzfixturemissing", []),
         ]
     elif pack_id == "quran-tr-en-pickthall":
@@ -2969,20 +3020,41 @@ def _run_fts_queries_v010(ctx: GateContext, root_label: str, db_fn: str, db_path
     conn = _open_ro_db(db_path)
     try:
         cur = conn.cursor()
+        if pack_id in ("quran-core", "quran-tafsir-ar-jalalayn"):
+            v_tbl = "ayahs_fts" if pack_id == "quran-core" else "tafsir_fts"
+            exists = cur.execute("SELECT 1 FROM sqlite_schema WHERE type='table' AND name = ?;", (v_tbl,)).fetchone()
+            if not exists:
+                raise GateCheckError(4, f"{root_label}/{db_fn}", f"Expected FTS table {v_tbl} missing from schema")
+            if pack_id == "quran-core":
+                cur.execute("CREATE VIRTUAL TABLE temp.vocab_v010 USING fts5vocab(main, ayahs_fts, 'instance');")
+            else:
+                cur.execute("CREATE VIRTUAL TABLE temp.vocab_v010 USING fts5vocab(main, tafsir_fts, 'instance');")
+            hits = cur.execute(
+                "SELECT count(*) FROM temp.vocab_v010 WHERE term = ? AND doc = ?;",
+                ("احمد", 5169),
+            ).fetchone()[0]
+            cur.execute("DROP TABLE temp.vocab_v010;")
+            if hits < 1:
+                raise GateCheckError(4, f"{root_label}/{db_fn}", f"fts5vocab missing 'احمد' at doc=5169 in {v_tbl}")
+
         for tbl, query_str, expected_row_ids in queries:
             if tbl not in _PACK_FTS_MAP[pack_id]:
                 raise GateCheckError(4, f"{root_label}/{db_fn}", f"Non-allowlisted FTS query table {tbl}")
 
-            effective_query = query_str
-            if tbl in _ARABIC_FTS_TABLES and _ARABIC_CHAR_RE.search(query_str):
-                effective_query = normalize_arabic(query_str)
-
-            if not effective_query.strip():
-                actual_row_ids: list[int] = []
+            if tbl in ("translations_fts", "word_translations_fts"):
+                s = query_str.strip()
+                quoted_phrase = f'"{s.replace("\"", "\"\"")}"' if s else None
             else:
-                escaped_query = effective_query.replace('"', '""')
-                quoted_phrase = f'"{escaped_query}"'
-                cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? AND rowid = 2 ORDER BY rowid;", [quoted_phrase])
+                quoted_phrase = arabic_match_literal(query_str)
+
+            if quoted_phrase is None:
+                actual_row_ids = []
+            elif expected_row_ids:
+                target_doc = expected_row_ids[0]
+                cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? AND rowid = ? ORDER BY rowid;", (quoted_phrase, target_doc))
+                actual_row_ids = [r[0] for r in cur.fetchall()]
+            else:
+                cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? ORDER BY rowid;", (quoted_phrase,))
                 actual_row_ids = [r[0] for r in cur.fetchall()]
 
             if actual_row_ids != expected_row_ids:

@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from pipelines.common.lock_inputs import author_lock
-from pipelines.common.search_text import normalize_arabic
+from pipelines.common.search_text import arabic_match_literal, normalize_arabic_search
 from tests.fixtures.tanzil import (
     SURAH_AYAH_COUNTS,
     build_synthetic_metadata_xml,
@@ -355,7 +355,7 @@ def test_build_quran_tafsir_success(tmp_path: Path) -> None:
             assert eid == start_id == end_id
             assert fmt == "plain"
             assert txt.strip()
-            assert txt_search == normalize_arabic(txt)
+            assert txt_search == normalize_arabic_search(txt)
 
         assert entries[0][0] == 1
         assert entries[0][1] == "1:1"
@@ -386,7 +386,7 @@ def test_build_quran_tafsir_success(tmp_path: Path) -> None:
 
         fts_match_diacritics = conn.execute(
             "SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ? AND rowid = 2;",
-            (f'"{normalize_arabic("رَبِّ العالمين")}"',),
+            (arabic_match_literal("رَبِّ العالمين"),),
         ).fetchall()
         assert fts_match_diacritics == [(2,)]
 
@@ -503,7 +503,7 @@ def test_qul_pointer_grouping_success(tmp_path: Path) -> None:
     assert entries[0].end_ayah_id == 1
     assert entries[0].text == "<p>Tafsir 1:1</p>"
     assert entries[0].text_format == "html"
-    assert entries[0].text_search == normalize_arabic("Tafsir 1:1")
+    assert entries[0].text_search == normalize_arabic_search("Tafsir 1:1")
 
     assert entries[1].id == 2
     assert entries[1].group_key == "1:2-3"
@@ -960,3 +960,126 @@ def test_build_grouped_tafsir_rows_empty_projection_still_rejected(tmp_path: Pat
     )
     with pytest.raises(ValueError, match="Projected search text is empty or blank"):
         build_grouped_tafsir_rows(p, {"1:1": 1}, language="ar")
+
+
+def test_jalalayn_forgiving_search_regression(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_tafsir import main
+    from pipelines.common.search_text import arabic_match_literal
+
+    source_phrase = "أَحْـمَدۚ عَلَىٰ صَلَاةٌ رَبِّ"
+    jal_xml = build_synthetic_jalalayn_xml().replace(
+        'text="  رَبِّ العالمين  "',
+        f'text="{source_phrase}"',
+        1,
+    )
+    sources_root, out_dir = _setup_jalalayn_pack_env(tmp_path, jalalayn_xml=jal_xml)
+    rc = main(["--sources-root", str(sources_root), "--output-dir", str(out_dir)])
+    assert rc == 0
+
+    db_path = out_dir / "quran-tafsir-ar-jalalayn.db"
+    conn = _open_ro_db(db_path)
+    try:
+        cur = conn.cursor()
+        # Verify source text bytes preserved
+        row = cur.execute("SELECT CAST(text AS BLOB) FROM tafsir_entries WHERE id = 1;").fetchone()
+        assert row[0] == source_phrase.encode("utf-8")
+
+        # Verify 4 tokens in fts5vocab
+        cur.execute("CREATE VIRTUAL TABLE temp.vocab USING fts5vocab(main, 'tafsir_fts', 'instance');")
+        for expected_token in ["احمد", "علي", "صلاه", "رب"]:
+            cnt = cur.execute(
+                "SELECT count(*) FROM temp.vocab WHERE term = ? AND doc = 1 AND col = 'text_search';",
+                (expected_token,),
+            ).fetchone()[0]
+            assert cnt >= 1, f"Token {expected_token} missing from tafsir_fts vocab at doc 1"
+        cur.execute("DROP TABLE temp.vocab;")
+
+        # MATCH already-folded literal
+        res_kb = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", ('"احمد علي صلاه رب"',)).fetchall()
+        assert res_kb == [(1,)]
+
+        # MATCH vocalized query via shared query helper
+        lit_voc = arabic_match_literal(source_phrase)
+        assert lit_voc is not None
+        res_voc = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", (lit_voc,)).fetchall()
+        assert res_voc == [(1,)]
+
+        # Negative control
+        neg = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", ('"zzzzabsentphrase"',)).fetchall()
+        assert neg == []
+
+        # Retain row 2 controls
+        res2 = cur.execute(
+            "SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ? AND rowid = 2;",
+            ('"الحمد لله رب العالمين"',),
+        ).fetchall()
+        assert res2 == [(2,)]
+    finally:
+        conn.close()
+
+
+def test_qul_html_forgiving_search_and_annotation_only_group(tmp_path: Path) -> None:
+    from pipelines.builders.build_quran_tafsir import main
+    from pipelines.common.search_text import arabic_match_literal
+
+    pack_id = "quran-tafsir-ar-ibn-kathir"
+    source_phrase = "أَحْـمَدۚ عَلَىٰ صَلَاةٌ رَبِّ"
+    html_markup = f"<p>تفسير <!-- ignored comment --> <script>ignored_token()</script> {source_phrase}</p>"
+    annot_markup = "<p>۞</p>"
+    custom_entries = {
+        "1:1": {"text": html_markup},
+        "1:2": {"text": annot_markup},
+    }
+    sources_root, out_dir = _setup_qul_tafsir_pack_env(tmp_path, pack_id=pack_id, custom_entries=custom_entries)
+    rc = main(["--sources-root", str(sources_root), "--output-dir", str(out_dir), "--pack", pack_id])
+    assert rc == 0
+
+    db_path = out_dir / f"{pack_id}.db"
+    conn = _open_ro_db(db_path)
+    try:
+        cur = conn.cursor()
+        # Verify raw HTML bytes retained in display column
+        row1 = cur.execute("SELECT CAST(text AS BLOB) FROM tafsir_entries WHERE id = 1;").fetchone()
+        assert row1[0] == html_markup.encode("utf-8")
+
+        # Verify vocab has the 4 folded tokens and NO hidden tokens
+        cur.execute("CREATE VIRTUAL TABLE temp.vocab USING fts5vocab(main, 'tafsir_fts', 'instance');")
+        for expected_token in ["احمد", "علي", "صلاه", "رب"]:
+            cnt = cur.execute(
+                "SELECT count(*) FROM temp.vocab WHERE term = ? AND doc = 1 AND col = 'text_search';",
+                (expected_token,),
+            ).fetchone()[0]
+            assert cnt >= 1, f"Token {expected_token} missing from tafsir_fts vocab at doc 1"
+
+        for hidden_token in ["ignored", "comment", "ignored_token", "script"]:
+            cnt = cur.execute(
+                "SELECT count(*) FROM temp.vocab WHERE term = ?;",
+                (hidden_token,),
+            ).fetchone()[0]
+            assert cnt == 0, f"Hidden token {hidden_token} found in tafsir_fts vocab"
+        cur.execute("DROP TABLE temp.vocab;")
+
+        # MATCH query returns doc 1
+        res = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", ('"احمد علي صلاه رب"',)).fetchall()
+        assert res == [(1,)]
+
+        # Vocalized MATCH via shared query helper
+        lit_voc = arabic_match_literal(source_phrase)
+        assert lit_voc is not None
+        res_voc = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", (lit_voc,)).fetchall()
+        assert res_voc == [(1,)]
+
+        # Absent phrase negative control
+        lit_absent = arabic_match_literal("غير موجود بالمره")
+        assert lit_absent is not None
+        res_abs = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", (lit_absent,)).fetchall()
+        assert res_abs == []
+
+        # Annotation-only entry at row 2 has blank text_search but counts in ar_present coverage
+        row2 = cur.execute("SELECT text_search FROM tafsir_entries WHERE id = 2;").fetchone()
+        assert not row2[0].strip()
+
+        cov = dict(cur.execute("SELECT metric, count FROM coverage_report;").fetchall())
+        assert cov["ar_present"] == 6236
+    finally:
+        conn.close()

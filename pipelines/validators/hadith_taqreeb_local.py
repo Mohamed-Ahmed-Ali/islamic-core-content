@@ -383,7 +383,7 @@ def verify_taqreeb_fts_smoke(db_path: Path, pack_id: str) -> None:
         "hadith-taqreeb-jami": (6000, ["الإِسْلَامُ عَلَىٰ", "الاسلام علي"], "علي"),
         "hadith-taqreeb-maalim": (1, ["الإِسْلَامُ عَلَىٰ", "الاسلام علي"], "علي"),
         "hadith-taqreeb-wajeez": (4325, ["الإِسْلَامُ عَلَىٰ", "الاسلام علي"], "علي"),
-        "hadith-taqreeb-kulliyyah": (28739, ["الأَعْمَالُ بالنِّيَّةِ", "الاعمال بالنيه"], "الاعمال"),
+        "hadith-taqreeb-kulliyyah": (28739, ["الأَعْمَالُ بالنِّيَّةِ", "الاعمال بالنيه"], "بالنيه"),
     }
 
     uri = f"{db_path.resolve().as_uri()}?mode=ro&immutable=1"
@@ -395,46 +395,50 @@ def verify_taqreeb_fts_smoke(db_path: Path, pack_id: str) -> None:
         if pack_id in targets:
             target_rowid, queries, vocab_term = targets[pack_id]
             exists = cur.execute("SELECT 1 FROM hadiths WHERE id = ?;", (target_rowid,)).fetchone()
-            if exists:
-                for q in queries:
-                    match_lit = arabic_match_literal(q)
-                    res = cur.execute(
-                        "SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ? AND rowid = ?;",
-                        (match_lit, target_rowid),
-                    ).fetchall()
-                    if res != [(target_rowid,)]:
-                        raise GateCheckError(
-                            4,
-                            db_path.name,
-                            f"FTS MATCH failed for {q!r} on rowid {target_rowid}: got {res}",
-                        )
-
-                cur.execute("CREATE VIRTUAL TABLE temp.taqreeb_vocab USING fts5vocab(main, hadiths_fts, 'instance');")
-                vocab_hits = cur.execute(
-                    "SELECT count(*) FROM temp.taqreeb_vocab WHERE term = ? AND doc = ?;",
-                    (vocab_term, target_rowid),
-                ).fetchone()[0]
-                if vocab_hits < 1:
+            if not exists:
+                raise GateCheckError(
+                    4,
+                    db_path.name,
+                    f"Expected positive rowid {target_rowid} absent from hadiths",
+                )
+            for q in queries:
+                match_lit = arabic_match_literal(q)
+                res = cur.execute(
+                    "SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ? AND rowid = ?;",
+                    (match_lit, target_rowid),
+                ).fetchall()
+                if res != [(target_rowid,)]:
                     raise GateCheckError(
                         4,
                         db_path.name,
-                        f"FTS token {vocab_term!r} missing from vocab for doc {target_rowid}",
+                        f"FTS MATCH failed for {q!r} on rowid {target_rowid}: got {res}",
                     )
 
-                if pack_id == "hadith-taqreeb-jami":
-                    for zero_rid in (7427, 8199, 16588):
-                        if cur.execute("SELECT 1 FROM hadiths WHERE id = ?;", (zero_rid,)).fetchone():
-                            cnt = cur.execute(
-                                "SELECT count(*) FROM temp.taqreeb_vocab WHERE doc = ?;",
-                                (zero_rid,),
-                            ).fetchone()[0]
-                            if cnt != 0:
-                                raise GateCheckError(
-                                    4,
-                                    db_path.name,
-                                    f"Expected 0 FTS terms for empty/cross-ref row {zero_rid}, got {cnt}",
-                                )
+            cur.execute("CREATE VIRTUAL TABLE temp.taqreeb_vocab USING fts5vocab(main, hadiths_fts, 'instance');")
+            vocab_hits = cur.execute(
+                "SELECT count(*) FROM temp.taqreeb_vocab WHERE term = ? AND doc = ?;",
+                (vocab_term, target_rowid),
+            ).fetchone()[0]
+            if vocab_hits < 1:
+                raise GateCheckError(
+                    4,
+                    db_path.name,
+                    f"FTS token {vocab_term!r} missing from vocab for doc {target_rowid}",
+                )
 
+            if pack_id == "hadith-taqreeb-jami":
+                for zero_rid in (7427, 8199, 16588):
+                    if cur.execute("SELECT 1 FROM hadiths WHERE id = ?;", (zero_rid,)).fetchone():
+                        cnt = cur.execute(
+                            "SELECT count(*) FROM temp.taqreeb_vocab WHERE doc = ?;",
+                            (zero_rid,),
+                        ).fetchone()[0]
+                        if cnt != 0:
+                            raise GateCheckError(
+                                4,
+                                db_path.name,
+                                f"Expected 0 FTS terms for empty/cross-ref row {zero_rid}, got {cnt}",
+                            )
         # Negative query must return no rows
         neg_lit = arabic_match_literal("zzzzfixturemissing")
         neg_res = cur.execute(

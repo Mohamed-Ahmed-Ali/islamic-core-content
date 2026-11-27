@@ -23,12 +23,13 @@ _ARABIC_DELETE_TABLE: dict[int, None] = {
 }
 
 
-def normalize_arabic(text: str) -> str:
-    """Normalize Arabic text for FTS search projection according to exact deletion rules.
+def strip_arabic_marks(text: str) -> str:
+    """Strip Arabic diacritical marks according to exact deletion rules.
 
     Deletes code points U+0610–U+061A, U+064B–U+065F, U+0670, U+06D6–U+06DC,
     U+06DF–U+06E4, U+06E7–U+06E8, and U+06EA–U+06ED.
-    Does not fold Arabic letters or apply Unicode decomposition.
+    Used for canonical morphology word_ar_clean and pre-existing Tafsir
+    nonblank coverage predicates.
     """
     return text.translate(_ARABIC_DELETE_TABLE)
 
@@ -124,24 +125,22 @@ class _TafsirHTMLParser(HTMLParser):
         pass
 
 
-def project_tafsir_text(text: str, *, text_format: str, language: str) -> str:
-    """Project Tafsir text into plain text search projection.
-
-    Supports 'plain' and 'html' formats. For HTML, collects text-node data
-    using HTMLParser(convert_charrefs=True) in source order, omits comments
-    and script/style bodies, and joins runs with a single ASCII space.
-    Applies Arabic normalization rule for language 'ar'.
-    """
+def tafsir_plain_text(text: str, *, text_format: str) -> str:
+    """Extract plain text from Tafsir source text without mark normalization."""
     if text_format == "plain":
-        projected = text
+        return text
     elif text_format == "html":
         parser = _TafsirHTMLParser()
         parser.feed(text)
         parser.close()
-        projected = " ".join(parser.runs)
+        return " ".join(parser.runs)
     else:
         raise ValueError(f"Unsupported text_format: {text_format!r}")
 
+
+def project_tafsir_text(text: str, *, text_format: str, language: str) -> str:
+    """Project Tafsir text into plain text search projection."""
+    plain = tafsir_plain_text(text, text_format=text_format)
     if language == "ar":
-        return normalize_arabic(projected)
-    return projected
+        return normalize_arabic_search(plain)
+    return plain

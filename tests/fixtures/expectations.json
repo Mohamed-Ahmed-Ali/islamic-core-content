@@ -9,6 +9,7 @@
       "fts": [
         {"table": "ayahs_fts", "query": "رَبِّ", "rowIds": [1]},
         {"table": "ayahs_fts", "query": "رب", "rowIds": [1]},
+        {"table": "ayahs_fts", "query": "احمد علي صلاه رب", "rowIds": [1]},
         {"table": "ayahs_fts", "query": "كتب", "rowIds": []}
       ]
     },

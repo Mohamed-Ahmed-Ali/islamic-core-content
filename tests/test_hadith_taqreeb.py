@@ -80,7 +80,7 @@ def _make_synthetic_taqreeb_json() -> dict[str, Any]:
                                     {
                                         "id": 1,
                                         "hadith_no": 1,
-                                        "text_ar": "إِنَّ الأَعْمَالَ عَلَىٰ نِيَّةٍ {[1]} {[1]}",
+                                        "text_ar": "إِنَّ الأَعْمَالَ عَلَىٰ نِيَّةٍ أَحْـمَدۚ عَلَىٰ صَلَاةٌ رَبِّ {[1]} {[1]}",
                                         "text_ar_simple": "إن الأعمال على نية",
                                         "takhreej": "أخرجه البخاري ومسلم.",
                                         "hukm": "صحيح",
@@ -251,11 +251,16 @@ def test_build_hadith_taqreeb_deterministic_and_query(tmp_path: Path) -> None:
         r1 = rows[0]
         assert r1[0] == 1
         assert r1[2] == 1  # hadith_no
-        assert r1[3] == "إِنَّ الأَعْمَالَ عَلَىٰ نِيَّةٍ {[1]} {[1]}"
+        assert r1[3] == "إِنَّ الأَعْمَالَ عَلَىٰ نِيَّةٍ أَحْـمَدۚ عَلَىٰ صَلَاةٌ رَبِّ {[1]} {[1]}"
         assert r1[4] == "إن الأعمال على نية"
         assert r1[8] == 0  # is_cross_ref
         assert r1[9] == "unsplit_raw"
-        assert r1[10] == "ان الاعمال علي نيه {[1]} {[1]}"
+        assert r1[10] == "ان الاعمال علي نيه احمد علي صلاه رب {[1]} {[1]}"
+
+        # Verify display values with CAST AS BLOB against expected utf-8 bytes
+        b_row = conn.execute("SELECT CAST(text_ar AS BLOB), CAST(text_ar_simple AS BLOB) FROM hadiths WHERE id = 1;").fetchone()
+        assert b_row[0] == "إِنَّ الأَعْمَالَ عَلَىٰ نِيَّةٍ أَحْـمَدۚ عَلَىٰ صَلَاةٌ رَبِّ {[1]} {[1]}".encode("utf-8")
+        assert b_row[1] == "إن الأعمال على نية".encode("utf-8")
 
         # Row 2: shares hadith_no 1
         r2 = rows[1]
@@ -313,6 +318,30 @@ def test_build_hadith_taqreeb_deterministic_and_query(tmp_path: Path) -> None:
         res2 = conn.execute("SELECT rowid FROM hadiths_fts WHERE text_ar_search MATCH ?;", (query2,)).fetchall()
         assert res1 == [(1,)]
         assert res2 == [(1,)]
+
+        # Verify vocab tokens for injected phrase
+        conn.execute("CREATE VIRTUAL TABLE temp.vocab USING fts5vocab(main, 'hadiths_fts', 'instance');")
+        for expected_token in ["احمد", "علي", "صلاه", "رب"]:
+            cnt = conn.execute(
+                "SELECT count(*) FROM temp.vocab WHERE term = ? AND doc = 1 AND col = 'text_ar_search';",
+                (expected_token,),
+            ).fetchone()[0]
+            assert cnt >= 1, f"Token {expected_token} missing from hadiths_fts vocab at doc 1"
+        conn.execute("DROP TABLE temp.vocab;")
+
+        # Injected phrase query hits row 1
+        res_kb = conn.execute("SELECT rowid FROM hadiths_fts WHERE text_ar_search MATCH ?;", ('"احمد علي صلاه رب"',)).fetchall()
+        assert res_kb == [(1,)]
+        lit_voc = arabic_match_literal("أَحْـمَدۚ عَلَىٰ صَلَاةٌ رَبِّ")
+        assert lit_voc is not None
+        res_voc = conn.execute("SELECT rowid FROM hadiths_fts WHERE text_ar_search MATCH ?;", (lit_voc,)).fetchall()
+        assert res_voc == [(1,)]
+
+        # Absent phrase negative control
+        lit_absent = arabic_match_literal("غير موجود بالمره")
+        assert lit_absent is not None
+        res_abs = conn.execute("SELECT rowid FROM hadiths_fts WHERE text_ar_search MATCH ?;", (lit_absent,)).fetchall()
+        assert res_abs == []
 
         # No citation hit (takhreej not indexed)
         query_takhreej = arabic_match_literal("البخاري")

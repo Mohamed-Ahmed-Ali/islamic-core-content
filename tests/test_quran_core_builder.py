@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from pipelines.common.search_text import normalize_arabic
+from pipelines.common.search_text import normalize_arabic_search
 from tests.fixtures.tanzil import (
     SURAH_AYAH_COUNTS,
     SURAH_STARTS,
@@ -93,7 +93,7 @@ def test_quran_core_builder_happy_path(tmp_path: Path) -> None:
         assert a1[3] == "1:1"
         assert a1[4] == "نص_Uthmani_1_1"
         assert a1[5] == "نص_Simple Clean_1_1"
-        assert a1[6] == normalize_arabic("نص_Simple Clean_1_1")
+        assert a1[6] == normalize_arabic_search("نص_Simple Clean_1_1")
         assert a1[7] == 1   # juz
         assert a1[8] == 1   # hizb
         assert a1[9] == 1   # manzil
@@ -143,7 +143,7 @@ def test_quran_core_builder_happy_path(tmp_path: Path) -> None:
 
         # FTS table verification
         # Positive query
-        search_term = normalize_arabic("نص_Simple Clean_1_1")
+        search_term = normalize_arabic_search("نص_Simple Clean_1_1")
         res = cur.execute(
             "SELECT rowid FROM ayahs_fts WHERE ayahs_fts MATCH ?;",
             (f'"{search_term}"',),
@@ -475,3 +475,63 @@ def test_pending_license_rejects_duplicate_unknown_permitted_uses(tmp_path: Path
     rc = main(["--sources-root", str(src_root), "--output-dir", str(out_dir)])
     assert rc == 1
     assert not (out_dir / "quran-core.db").exists()
+
+
+@pytest.mark.parametrize("query_variant", ["folded", "vocalized"])
+def test_quran_core_forgiving_search_regression(tmp_path: Path, query_variant: str) -> None:
+    from pipelines.builders.build_quran_core import main
+    from pipelines.common.search_text import arabic_match_literal
+
+    source_phrase = "أَحْـمَدۚ عَلَىٰ صَلَاةٌ رَبِّ"
+    uthmani_phrase = "نص_Uthmani_Distinct_1_1"
+    clean_xml = build_synthetic_scripture_xml("Simple Clean").replace(
+        'text="نص_Simple Clean_1_1"',
+        f'text="{source_phrase}"',
+    )
+    uthmani_xml = build_synthetic_scripture_xml("Uthmani").replace(
+        'text="نص_Uthmani_1_1"',
+        f'text="{uthmani_phrase}"',
+    )
+
+    src_root, out_dir = setup_synthetic_pack_env(
+        tmp_path, clean_xml=clean_xml, uthmani_xml=uthmani_xml
+    )
+    rc = main(["--sources-root", str(src_root), "--output-dir", str(out_dir)])
+    assert rc == 0
+    db_path = out_dir / "quran-core.db"
+
+    conn = _open_ro_db(db_path)
+    try:
+        cur = conn.cursor()
+        # Verify display values byte equality
+        row = cur.execute(
+            "SELECT CAST(text_simple_clean AS BLOB), CAST(text_uthmani AS BLOB) FROM ayahs WHERE id = 1;"
+        ).fetchone()
+        assert row[0] == source_phrase.encode("utf-8")
+        assert row[1] == uthmani_phrase.encode("utf-8")
+
+        # Verify all four tokens in temporary fts5vocab
+        cur.execute("CREATE VIRTUAL TABLE temp.vocab USING fts5vocab(main, 'ayahs_fts', 'instance');")
+        for expected_token in ["احمد", "علي", "صلاه", "رب"]:
+            cnt = cur.execute(
+                "SELECT count(*) FROM temp.vocab WHERE term = ? AND doc = 1 AND col = 'text_ar_search';",
+                (expected_token,),
+            ).fetchone()[0]
+            assert cnt >= 1, f"Token {expected_token} missing from ayahs_fts vocab at doc 1"
+        cur.execute("DROP TABLE temp.vocab;")
+
+        # Query assertion
+        if query_variant == "folded":
+            q_lit = '"احمد علي صلاه رب"'
+        else:
+            q_lit = arabic_match_literal(source_phrase)
+        assert q_lit is not None
+
+        res = cur.execute("SELECT rowid FROM ayahs_fts WHERE ayahs_fts MATCH ?;", (q_lit,)).fetchall()
+        assert res == [(1,)]
+
+        # Negative control
+        neg = cur.execute("SELECT rowid FROM ayahs_fts WHERE ayahs_fts MATCH ?;", ('"zzzzabsentphrase"',)).fetchall()
+        assert neg == []
+    finally:
+        conn.close()

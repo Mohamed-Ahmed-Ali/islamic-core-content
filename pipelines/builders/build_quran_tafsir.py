@@ -14,7 +14,11 @@ from jsonschema import Draft202012Validator, ValidationError
 from pipelines.common.lock_inputs import parse_strict_json
 from pipelines.common.qul_input import read_zip_strict_json
 from pipelines.common.quran_pack import load_quran_pack, write_quran_pack
-from pipelines.common.search_text import project_tafsir_text
+from pipelines.common.search_text import (
+    project_tafsir_text,
+    strip_arabic_marks,
+    tafsir_plain_text,
+)
 from pipelines.common.tanzil_coordinates import (
     load_tanzil_coordinates,
     load_tanzil_text,
@@ -115,8 +119,11 @@ def _make_tafsir_entry_row(
     """Construct TafsirEntryRow deriving start/id/end from members."""
     text_search = project_tafsir_text(text, text_format=text_format, language=language)
     if not text_search.strip():
-        if not allow_blank_text_search:
-            raise ValueError(f"Projected search text is empty or blank for group {group_key!r}")
+        legacy_plain = tafsir_plain_text(text, text_format=text_format)
+        legacy_text = strip_arabic_marks(legacy_plain) if language == "ar" else legacy_plain
+        if not legacy_text.strip():
+            if not allow_blank_text_search:
+                raise ValueError(f"Projected search text is empty or blank for group {group_key!r}")
         text_search = ""
     entry_id = members[0][0]
     return TafsirEntryRow(
@@ -455,7 +462,14 @@ def build_quran_tafsir(
         raise ValueError(f"Unknown pack kind: {cfg['kind']!r}")
 
     expected_total = len(coords.ayah_ids)
-    entry_has_text = {e.id: bool(e.text_search.strip()) for e in entries}
+    def _entry_has_text(entry: TafsirEntryRow, lang: str) -> bool:
+        if entry.text_search.strip():
+            return True
+        legacy_plain = tafsir_plain_text(entry.text, text_format=entry.text_format)
+        legacy_text = strip_arabic_marks(legacy_plain) if lang == "ar" else legacy_plain
+        return bool(legacy_text.strip())
+
+    entry_has_text = {e.id: _entry_has_text(e, cfg["language"]) for e in entries}
     present_count = sum(1 for m in map_rows if entry_has_text[m.entry_id])
 
     completeness = "partial" if present_count < expected_total else "complete"

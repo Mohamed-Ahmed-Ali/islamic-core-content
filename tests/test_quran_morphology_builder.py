@@ -10,7 +10,6 @@ import zipfile
 import pytest
 
 from pipelines.common.lock_inputs import author_lock, canonical_entries_json
-from pipelines.common.search_text import normalize_arabic
 from tests.fixtures.tanzil import (
     SURAH_AYAH_COUNTS,
     build_synthetic_metadata_xml,

@@ -25,7 +25,7 @@ from pipelines.common.lock_inputs import (
     verify_exact_file_on_disk,
     verify_lock,
 )
-from pipelines.common.search_text import normalize_arabic
+from pipelines.common.search_text import strip_arabic_marks
 from pipelines.common.sqlite_utils import (
     finalize_pack,
     open_pack,
@@ -691,7 +691,7 @@ def build_quran_morphology(sources_root: Path, output_dir: Path) -> None:
     ):
         segs = list(seg_iter)
         uthmani_text = "".join(s.form_ar for s in segs)
-        clean_text = normalize_arabic(uthmani_text)
+        clean_text = strip_arabic_marks(uthmani_text)
         word_key = f"{s_id}:{a_id}:{w_num}"
 
         # Choose stem: earliest verb stem if present, otherwise earliest STEM;

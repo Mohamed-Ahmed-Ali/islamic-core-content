@@ -25,6 +25,28 @@ from pipelines.common.pack_sources import load_sqlite_source_metadata
 from pipelines.common.stage_qul_inputs import audit_all_wbw_inputs
 from pipelines.common.tanzil_coordinates import load_tanzil_coordinates
 from pipelines.validators.word_alignment import validate_word_alignment
+from pipelines.common.search_text import arabic_match_literal
+
+_PHASE3_PACK_FTS_TABLE: dict[str, str] = {
+    "quran-core": "ayahs_fts",
+    "quran-wbw-en": "word_translations_fts",
+    "quran-tr-en-sahih": "translations_fts",
+    "quran-tafsir-ar-ibn-kathir": "tafsir_fts",
+    "quran-tafsir-ar-tabari": "tafsir_fts",
+    "quran-tafsir-ar-qurtubi": "tafsir_fts",
+    "quran-tafsir-ar-wasit": "tafsir_fts",
+    "quran-tafsir-ar-razi": "tafsir_fts",
+    "quran-tafsir-en-ibn-kathir": "tafsir_fts",
+}
+
+_PHASE3_ARABIC_ANCHORS: dict[str, tuple[str, str, str, int]] = {
+    "quran-core": ("بسم", "احمد", "أَحْمَد", 5169),
+    "quran-tafsir-ar-ibn-kathir": ("بسم", "الصلاه", "الصَّلَاة", 1),
+    "quran-tafsir-ar-tabari": ("القول", "تاويل", "تَأْوِيل", 1),
+    "quran-tafsir-ar-qurtubi": ("الكلام", "البسمله", "البَسْمَلَة", 1),
+    "quran-tafsir-ar-wasit": ("بسم", "الذي", "الذى", 1),
+    "quran-tafsir-ar-razi": ("الباء", "الالصاق", "الإِلْصَاق", 1),
+}
 
 
 class GateCheckError(Exception):
@@ -606,53 +628,75 @@ def verify_phase3_acceptance_controls(db_path: Path, pack_id: str, root_label: s
 
 def run_phase3_fts_smoke(db_path: Path, pack_id: str, root_label: str, db_fn: str) -> None:
     """Check #4: Execute FTS positive controls at rowid 1 and bound negative query."""
+    if pack_id not in _PHASE3_PACK_FTS_TABLE:
+        return
+
+    tbl = _PHASE3_PACK_FTS_TABLE[pack_id]
     with closing(_open_ro_db(db_path)) as conn:
         cur = conn.cursor()
-        # Verify negative control returns 0 rows on all FTS tables
-        fts_tables = [
-            r[0] for r in cur.execute(
-                "SELECT name FROM sqlite_schema WHERE type='table' AND name LIKE '%_fts' ORDER BY name;"
-            ).fetchall()
-        ]
-        for tbl in fts_tables:
-            neg_res = cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ?;", ("zzzzfixturemissing",)).fetchall()
-            if neg_res:
-                raise GateCheckError(4, f"{root_label}/{db_fn}", f"Negative FTS query matched rows in {tbl}: {neg_res}")
+        # Verify table exists in schema
+        exists = cur.execute(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name = ?;", (tbl,)
+        ).fetchone()
+        if not exists:
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Expected FTS table {tbl} missing from database")
+
+        # Verify negative control returns 0 rows on allowlisted FTS table
+        if pack_id in _PHASE3_ARABIC_ANCHORS:
+            neg_lit = arabic_match_literal("zzzzfixturemissing")
+        else:
+            neg_lit = '"zzzzfixturemissing"'
+        neg_res = cur.execute(f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ?;", (neg_lit,)).fetchall()
+        if neg_res:
+            raise GateCheckError(4, f"{root_label}/{db_fn}", f"Negative FTS query matched rows in {tbl}: {neg_res}")
 
         # Positive controls
-        if pack_id == "quran-core":
-            res = cur.execute("SELECT rowid FROM ayahs_fts WHERE ayahs_fts MATCH ?;", ("بسم",)).fetchall()
-            if not any(r[0] == 1 for r in res):
-                raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query 'بسم' did not match rowid 1: {res}")
-        elif pack_id in ("quran-tafsir-ar-ibn-kathir", "quran-tafsir-ar-wasit"):
-            res = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", ("بسم",)).fetchall()
-            if not any(r[0] == 1 for r in res):
-                raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query 'بسم' did not match rowid 1: {res}")
-        elif pack_id == "quran-tafsir-ar-tabari":
-            res = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", ("القول",)).fetchall()
-            if not any(r[0] == 1 for r in res):
-                raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query 'القول' did not match rowid 1: {res}")
-        elif pack_id == "quran-tafsir-ar-qurtubi":
-            res = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", ("الكلام",)).fetchall()
-            if not any(r[0] == 1 for r in res):
-                raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query 'الكلام' did not match rowid 1: {res}")
-        elif pack_id == "quran-tafsir-ar-razi":
-            res = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", ("الباء",)).fetchall()
-            if not any(r[0] == 1 for r in res):
-                raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query 'الباء' did not match rowid 1: {res}")
+        if pack_id in _PHASE3_ARABIC_ANCHORS:
+            old_term, kb_term, raw_voc_term, target_rowid = _PHASE3_ARABIC_ANCHORS[pack_id]
+
+            # Check term in fts5vocab at target_rowid
+            if tbl == "ayahs_fts":
+                cur.execute("CREATE VIRTUAL TABLE temp.vocab_smoke USING fts5vocab(main, ayahs_fts, 'instance');")
+            else:
+                cur.execute("CREATE VIRTUAL TABLE temp.vocab_smoke USING fts5vocab(main, tafsir_fts, 'instance');")
+            cnt = cur.execute(
+                "SELECT count(*) FROM temp.vocab_smoke WHERE term = ? AND doc = ?;",
+                (kb_term, target_rowid),
+            ).fetchone()[0]
+            cur.execute("DROP TABLE temp.vocab_smoke;")
+            if cnt < 1:
+                raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS vocab term {kb_term!r} missing for doc {target_rowid} in {tbl}")
+
+            # Loop old/raw/keyboard probes with bound IDs; fail when a required control normalizes to no query
+            probes = [
+                (old_term, 1),
+                (kb_term, target_rowid),
+                (raw_voc_term, target_rowid),
+            ]
+            for term, exp_doc in probes:
+                q = arabic_match_literal(term)
+                if q is None:
+                    raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query {term!r} normalized to None")
+                res = cur.execute(
+                    f"SELECT rowid FROM {tbl} WHERE {tbl} MATCH ? AND rowid = ? ORDER BY rowid;",
+                    (q, exp_doc),
+                ).fetchall()
+                if not any(r[0] == exp_doc for r in res):
+                    raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query {term!r} did not match rowid {exp_doc} in {tbl}: {res}")
+
         elif pack_id == "quran-tafsir-en-ibn-kathir":
-            res = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ?;", ("Meaning",)).fetchall()
+            res = cur.execute("SELECT rowid FROM tafsir_fts WHERE tafsir_fts MATCH ? AND rowid = 1 ORDER BY rowid;", ('"Meaning"',)).fetchall()
             if not any(r[0] == 1 for r in res):
                 raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query 'Meaning' did not match rowid 1: {res}")
         elif pack_id == "quran-tr-en-sahih":
-            res = cur.execute("SELECT rowid FROM translations_fts WHERE translations_fts MATCH ?;", ('"Entirely Merciful"',)).fetchall()
+            res = cur.execute("SELECT rowid FROM translations_fts WHERE translations_fts MATCH ? AND rowid = 1 ORDER BY rowid;", ('"Entirely Merciful"',)).fetchall()
             if not any(r[0] == 1 for r in res):
                 raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query 'Entirely Merciful' did not match rowid 1: {res}")
         elif pack_id == "quran-wbw-en":
-            target_id_row = cur.execute("SELECT id FROM word_translations WHERE word_key='1:5:2';").fetchone()
+            target_id_row = cur.execute("SELECT id FROM word_translations WHERE word_key = ?;", ("1:5:2",)).fetchone()
             if not target_id_row:
                 raise GateCheckError(4, f"{root_label}/{db_fn}", "Target word_key 1:5:2 not found in word_translations")
             target_id = target_id_row[0]
-            res = cur.execute("SELECT rowid FROM word_translations_fts WHERE word_translations_fts MATCH ?;", ('"we worship"',)).fetchall()
+            res = cur.execute("SELECT rowid FROM word_translations_fts WHERE word_translations_fts MATCH ? AND rowid = ? ORDER BY rowid;", ('"we worship"', target_id)).fetchall()
             if not any(r[0] == target_id for r in res):
                 raise GateCheckError(4, f"{root_label}/{db_fn}", f"FTS positive query 'we worship' did not match rowid {target_id}: {res}")

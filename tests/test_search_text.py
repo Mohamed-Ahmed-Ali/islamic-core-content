@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import pytest
-
 from pipelines.common.search_text import (
     arabic_match_literal,
     normalize_arabic_search,
+    project_tafsir_text,
+    strip_arabic_marks,
+    tafsir_plain_text,
 )
 
 
@@ -188,3 +189,26 @@ def test_arabic_match_literal_quoting_and_escaping() -> None:
     assert arabic_match_literal('قال "نعم" و"لا"') == '"قال ""نعم"" و""لا"""'
     assert arabic_match_literal('"') == '""""'
     assert arabic_match_literal('""') == '""""""'
+
+
+def test_strip_arabic_marks_legacy_contract() -> None:
+    # Deletes diacritics but does NOT fold alefs, yaa, or ta marbuta
+    assert strip_arabic_marks("أَحْـمَد") == "أحـمد"
+    assert strip_arabic_marks("رَبِّ") == "رب"
+    # Does not fold ta marbuta or yaa
+    assert strip_arabic_marks("صَلَاةٌ") == "صلاة"
+    assert strip_arabic_marks("عَلَىٰ") == "على"
+
+
+def test_tafsir_plain_text_and_project_tafsir_text() -> None:
+    html = "<p>تفسير <!-- comment --> <script>ignore</script> أَحْـمَد</p>"
+    plain = tafsir_plain_text(html, text_format="html")
+    assert plain == "تفسير أَحْـمَد"
+
+    # ar uses forgiving normalization
+    proj_ar = project_tafsir_text(html, text_format="html", language="ar")
+    assert proj_ar == "تفسير احمد"
+
+    # non-ar does not normalize Arabic
+    proj_en = project_tafsir_text(html, text_format="html", language="en")
+    assert proj_en == "تفسير أَحْـمَد"

@@ -324,47 +324,89 @@ class TestHadithBuilder:
 
         assert hashlib.sha256(db1_bytes).hexdigest() == hashlib.sha256(db2_bytes).hexdigest()
     def test_search_surface_isolation(self, tmp_path: Path) -> None:
-        """Verify dual FTS search surface isolation rules."""
-        root, out_dir = _setup_hadith_pack_env(tmp_path, "bukhari")
+        """Verify dual FTS search surface isolation rules and forgiving normalization."""
+        from pipelines.common.search_text import arabic_match_literal
+
+        source_phrase = "أَحْـمَدۚ عَلَىٰ صَلَاةٌ رَبِّ"
+        data = _make_canonical_hadith_data()
+        # Row 1: unsplit raw, set arabicFull to source_phrase
+        data["hadiths"][0]["arabicFull"] = source_phrase
+        # Row 2: source_verified, prefix arabicFull with existing Sanad and set arabicMatn to source_phrase
+        sanad_text = data["hadiths"][1]["arabicSanad"]
+        data["hadiths"][1]["arabicFull"] = sanad_text + " " + source_phrase
+        data["hadiths"][1]["arabicMatn"] = source_phrase
+
+        splits_data = {
+            "2": {
+                "sourceRef": "Synthetic verified split 2",
+                "arabicSanad": sanad_text,
+                "arabicMatn": source_phrase,
+            }
+        }
+        root, out_dir = _setup_hadith_pack_env(tmp_path, "bukhari", data=data, splits_data=splits_data)
         build_hadith_book(book="bukhari", sources_root=root, output_dir=out_dir)
 
         conn = _open_ro_db(out_dir / "hadith-bukhari.db")
         try:
-            from pipelines.common.search_text import normalize_arabic
+            cur = conn.cursor()
+            # Verify raw source data bytes preserved
+            r1 = cur.execute(
+                "SELECT CAST(arabic_full AS BLOB), CAST(english_full AS BLOB), CAST(english_body AS BLOB) FROM hadiths WHERE id = 1;"
+            ).fetchone()
+            assert r1[0] == source_phrase.encode("utf-8")
+            assert r1[1] == b"I heard Allah's Messenger saying..."
+            assert r1[2] == b"I heard Allah's Messenger saying..."
 
-            def _query_fts(table: str, q: str) -> list[int]:
-                eff = normalize_arabic(q) if any("\u0600" <= c <= "\u06ff" for c in q) else q
-                if not eff.strip():
-                    return []
-                escaped = eff.replace('"', '""')
-                rows = conn.execute(
-                    f'SELECT rowid FROM {table} WHERE {table} MATCH ? ORDER BY rowid;',
-                    [f'"{escaped}"'],
-                ).fetchall()
-                return [r[0] for r in rows]
+            r2 = cur.execute(
+                "SELECT CAST(arabic_full AS BLOB), CAST(arabic_sanad AS BLOB), CAST(arabic_matn AS BLOB), CAST(english_full AS BLOB), CAST(english_body AS BLOB) FROM hadiths WHERE id = 2;"
+            ).fetchone()
+            assert r2[0] == (sanad_text + " " + source_phrase).encode("utf-8")
+            assert r2[1] == sanad_text.encode("utf-8")
+            assert r2[2] == source_phrase.encode("utf-8")
+            assert r2[3] == b"Lord have mercy"
+            assert r2[4] == b"Lord have mercy"
 
-            # 1. Unsplit row (Row 1):
-            # Arabic text is in hadiths_full_fts, NOT in hadiths_fts
-            assert _query_fts("hadiths_full_fts", "الْحُمَيْدِيُّ") == [1]
-            assert _query_fts("hadiths_full_fts", "الحميدي") == [1]
-            assert _query_fts("hadiths_fts", "الحميدي") == []
+            # Check tokens in fts5vocab for hadiths_full_fts (Row 1) with explicit column
+            cur.execute("CREATE VIRTUAL TABLE temp.vocab_full USING fts5vocab(main, 'hadiths_full_fts', 'instance');")
+            for token in ["احمد", "علي", "صلاه", "رب"]:
+                cnt = cur.execute(
+                    "SELECT count(*) FROM temp.vocab_full WHERE term = ? AND doc = 1 AND col = 'arabic_full_clean';",
+                    (token,),
+                ).fetchone()[0]
+                assert cnt >= 1, f"Token {token} missing from hadiths_full_fts vocab at doc 1"
+            cur.execute("DROP TABLE temp.vocab_full;")
 
-            # 2. Verified row (Row 2):
-            # Matn is in hadiths_fts, NOT in hadiths_full_fts
-            assert _query_fts("hadiths_fts", "ارحم") == [2]
-            assert _query_fts("hadiths_fts", "ارْحَمْ") == [2]
-            assert _query_fts("hadiths_full_fts", "ارحم") == []
+            # Check tokens in fts5vocab for hadiths_fts (Row 2, column arabic_matn_clean)
+            cur.execute("CREATE VIRTUAL TABLE temp.vocab_matn USING fts5vocab(main, 'hadiths_fts', 'instance');")
+            for token in ["احمد", "علي", "صلاه", "رب"]:
+                cnt = cur.execute(
+                    "SELECT count(*) FROM temp.vocab_matn WHERE term = ? AND doc = 2 AND col = 'arabic_matn_clean';",
+                    (token,),
+                ).fetchone()[0]
+                assert cnt >= 1, f"Token {token} missing from hadiths_fts vocab at doc 2"
+            cur.execute("DROP TABLE temp.vocab_matn;")
 
-            # 3. Unsplit row English narrator vs body (Row 1):
+            # Query row 1 in hadiths_full_fts ONLY
+            assert cur.execute("SELECT rowid FROM hadiths_full_fts WHERE hadiths_full_fts MATCH ?;", ('"احمد علي صلاه رب"',)).fetchall() == [(1,)]
+            q_lit = arabic_match_literal(source_phrase)
+            assert q_lit is not None
+            assert cur.execute("SELECT rowid FROM hadiths_full_fts WHERE hadiths_full_fts MATCH ?;", (q_lit,)).fetchall() == [(1,)]
+            assert cur.execute("SELECT rowid FROM hadiths_full_fts WHERE hadiths_full_fts MATCH ? AND rowid = 2;", (q_lit,)).fetchall() == []
+
+            # Query row 2 in hadiths_fts ONLY
+            assert cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ?;", ('"احمد علي صلاه رب"',)).fetchall() == [(2,)]
+            assert cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ?;", (q_lit,)).fetchall() == [(2,)]
+            assert cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ? AND rowid = 1;", (q_lit,)).fetchall() == []
+
+            # Unsplit row English narrator vs body (Row 1):
             # Phrase in body ("saying") is searchable in hadiths_fts
-            assert _query_fts("hadiths_fts", "saying") == [1]
-
+            assert cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ?;", ('"saying"',)).fetchall() == [(1,)]
             # Phrase only in narrator ("Khattab") is NOT searchable in hadiths_fts
-            assert _query_fts("hadiths_fts", "Khattab") == []
+            assert cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ?;", ('"Khattab"',)).fetchall() == []
 
-            # 4. Nonexistent term
-            assert _query_fts("hadiths_fts", "nonexistentxyz") == []
-            assert _query_fts("hadiths_full_fts", "nonexistentxyz") == []
+            # Negative control
+            assert cur.execute("SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ?;", ('"nonexistentxyz"',)).fetchall() == []
+            assert cur.execute("SELECT rowid FROM hadiths_full_fts WHERE hadiths_full_fts MATCH ?;", ('"nonexistentxyz"',)).fetchall() == []
         finally:
             conn.close()
 

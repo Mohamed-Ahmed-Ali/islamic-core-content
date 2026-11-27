@@ -13,7 +13,6 @@ from typing import Any
 import pytest
 
 from pipelines.common.lock_inputs import author_lock
-from pipelines.common.search_text import normalize_arabic
 from pipelines.builders.build_hadith_book import build_hadith_book
 from pipelines.validators.quality_gate import _HADITH_LOCAL_ORACLE, main, run_checks, GateCheckError
 
