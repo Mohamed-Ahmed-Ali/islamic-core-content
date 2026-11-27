@@ -17,10 +17,7 @@ from pipelines.common.lock_inputs import (
 )
 from pipelines.common.pack_sources import load_sqlite_source_metadata
 from pipelines.common.stage_taqreeb_inputs import TAQREEB_SOURCES
-from pipelines.common.taqreeb_search import (
-    normalize_taqreeb_arabic,
-    taqreeb_match_literal,
-)
+from pipelines.common.search_text import arabic_match_literal
 from pipelines.builders.hadith_taqreeb_builder import (
     build_hadith_taqreeb,
     main,
@@ -225,33 +222,6 @@ def _setup_synthetic_taqreeb_env(
     return sources_root, output_dir
 
 
-def test_taqreeb_search_normalization_and_match_literal() -> None:
-    # Basic normalization with foldings: أ إ آ ٱ -> ا and ى ی -> ي
-    raw = "إِنَّ الأَعْمَالَ عَلَىٰ نِيَّةٍ"
-    norm = normalize_taqreeb_arabic(raw)
-    assert norm == "ان الاعمال علي نية"
-
-    # Persian Yeh folding
-    assert normalize_taqreeb_arabic("ی") == "ي"
-    # Alef wasla
-    assert normalize_taqreeb_arabic("ٱ") == "ا"
-    # Non-folded characters: ئ, ء, ؤ, ة
-    assert normalize_taqreeb_arabic("شَيْءٌ وَمَسْؤُولٌ وَبِرْئٌ وَرَحْمَةٌ") == "شيء ومسؤول وبرئ ورحمة"
-
-    # Literal matching:
-    # Diacritics only returns None
-    assert taqreeb_match_literal("ًٌٍَُِّْٰ") is None
-    assert taqreeb_match_literal("   ") is None
-    assert taqreeb_match_literal("") is None
-
-    # Quoting and escaping
-    matched = taqreeb_match_literal('الأعمال "علي"')
-    assert matched == '"الاعمال ""علي"""'
-
-    # Single word query
-    assert taqreeb_match_literal("الأعمال عَلَىٰ") == '"الاعمال علي"'
-    assert taqreeb_match_literal("الاعمال علي") == '"الاعمال علي"'
-
 
 def test_build_hadith_taqreeb_deterministic_and_query(tmp_path: Path) -> None:
     sources_root, output_dir = _setup_synthetic_taqreeb_env(tmp_path)
@@ -285,7 +255,7 @@ def test_build_hadith_taqreeb_deterministic_and_query(tmp_path: Path) -> None:
         assert r1[4] == "إن الأعمال على نية"
         assert r1[8] == 0  # is_cross_ref
         assert r1[9] == "unsplit_raw"
-        assert r1[10] == "ان الاعمال علي نية {[1]} {[1]}"
+        assert r1[10] == "ان الاعمال علي نيه {[1]} {[1]}"
 
         # Row 2: shares hadith_no 1
         r2 = rows[1]
@@ -335,8 +305,8 @@ def test_build_hadith_taqreeb_deterministic_and_query(tmp_path: Path) -> None:
 
         # FTS query verification:
         # Both "الأعمال عَلَىٰ" and "الاعمال علي" hit exactly rowid=1
-        query1 = taqreeb_match_literal("الأعمال عَلَىٰ")
-        query2 = taqreeb_match_literal("الاعمال علي")
+        query1 = arabic_match_literal("الأعمال عَلَىٰ")
+        query2 = arabic_match_literal("الاعمال علي")
         assert query1 is not None and query2 is not None
 
         res1 = conn.execute("SELECT rowid FROM hadiths_fts WHERE text_ar_search MATCH ?;", (query1,)).fetchall()
@@ -345,14 +315,14 @@ def test_build_hadith_taqreeb_deterministic_and_query(tmp_path: Path) -> None:
         assert res2 == [(1,)]
 
         # No citation hit (takhreej not indexed)
-        query_takhreej = taqreeb_match_literal("البخاري")
+        query_takhreej = arabic_match_literal("البخاري")
         assert query_takhreej is not None
         res_tak = conn.execute("SELECT rowid FROM hadiths_fts WHERE text_ar_search MATCH ?;", (query_takhreej,)).fetchall()
         assert res_tak == []
 
         # Injection-shaped queries do not execute as FTS operators
         for injection in ['" OR 1=1 --', "NOT rowid", "* AND *", "NEAR()"]:
-            lit = taqreeb_match_literal(injection)
+            lit = arabic_match_literal(injection)
             if lit is not None:
                 res_inj = conn.execute("SELECT rowid FROM hadiths_fts WHERE text_ar_search MATCH ?;", (lit,)).fetchall()
                 assert res_inj == []

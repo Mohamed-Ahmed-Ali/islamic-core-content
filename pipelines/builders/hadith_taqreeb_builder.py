@@ -25,7 +25,7 @@ from pipelines.common.sqlite_utils import (
     write_pack_metadata,
 )
 from pipelines.common.stage_taqreeb_inputs import TAQREEB_SOURCES
-from pipelines.common.taqreeb_search import normalize_taqreeb_arabic
+from pipelines.common.search_text import normalize_arabic_search
 from pipelines.toolchain.check_runtime import verify_runtime
 
 ALLOWED_PACK_IDS: frozenset[str] = frozenset(TAQREEB_SOURCES.keys())
@@ -320,7 +320,7 @@ def build_hadith_taqreeb(pack_id: str, sources_root: Path, output_dir: Path) -> 
                             empty_text_count += 1
 
                     text_split_mode = "unsplit_raw"
-                    text_ar_search = normalize_taqreeb_arabic(text_ar) if text_ar else ""
+                    text_ar_search = normalize_arabic_search(text_ar) if text_ar else ""
 
                     hadiths_rows.append((
                         h_id,

@@ -16,9 +16,9 @@ from pipelines.common.lock_inputs import (
 )
 from pipelines.common.pack_sources import load_sqlite_source_metadata
 from pipelines.common.stage_taqreeb_inputs import TAQREEB_SOURCES
-from pipelines.common.taqreeb_search import (
-    normalize_taqreeb_arabic,
-    taqreeb_match_literal,
+from pipelines.common.search_text import (
+    arabic_match_literal,
+    normalize_arabic_search,
 )
 from pipelines.validators.phase3_local import (
     GateCheckError,
@@ -240,7 +240,7 @@ def verify_taqreeb_db_content(
                             empty_text_count += 1
 
                     text_split_mode = "unsplit_raw"
-                    text_ar_search = normalize_taqreeb_arabic(text_ar) if text_ar else ""
+                    text_ar_search = normalize_arabic_search(text_ar) if text_ar else ""
 
                     hadiths_rows.append((
                         h_id,
@@ -383,7 +383,7 @@ def verify_taqreeb_fts_smoke(db_path: Path, pack_id: str) -> None:
         "hadith-taqreeb-jami": (6000, ["الإِسْلَامُ عَلَىٰ", "الاسلام علي"], "علي"),
         "hadith-taqreeb-maalim": (1, ["الإِسْلَامُ عَلَىٰ", "الاسلام علي"], "علي"),
         "hadith-taqreeb-wajeez": (4325, ["الإِسْلَامُ عَلَىٰ", "الاسلام علي"], "علي"),
-        "hadith-taqreeb-kulliyyah": (28739, ["الأَعْمَالُ بالنِّيَّةِ", "الاعمال بالنية"], "الاعمال"),
+        "hadith-taqreeb-kulliyyah": (28739, ["الأَعْمَالُ بالنِّيَّةِ", "الاعمال بالنيه"], "الاعمال"),
     }
 
     uri = f"{db_path.resolve().as_uri()}?mode=ro&immutable=1"
@@ -397,7 +397,7 @@ def verify_taqreeb_fts_smoke(db_path: Path, pack_id: str) -> None:
             exists = cur.execute("SELECT 1 FROM hadiths WHERE id = ?;", (target_rowid,)).fetchone()
             if exists:
                 for q in queries:
-                    match_lit = taqreeb_match_literal(q)
+                    match_lit = arabic_match_literal(q)
                     res = cur.execute(
                         "SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ? AND rowid = ?;",
                         (match_lit, target_rowid),
@@ -436,7 +436,7 @@ def verify_taqreeb_fts_smoke(db_path: Path, pack_id: str) -> None:
                                 )
 
         # Negative query must return no rows
-        neg_lit = taqreeb_match_literal("zzzzfixturemissing")
+        neg_lit = arabic_match_literal("zzzzfixturemissing")
         neg_res = cur.execute(
             "SELECT rowid FROM hadiths_fts WHERE hadiths_fts MATCH ?;",
             (neg_lit,),
