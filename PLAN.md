@@ -303,7 +303,53 @@ Unless qualified, builder section references below point to `ARCHITECTURE.md`. I
 * [x] **Task 4.5 (Pytest Discovery):** Restrict discovery to `tests/` and ignore unindexed directories.
 * [x] **Task 4.6 (Search Normalizer):** Define shared Arabic FTS normalization contract and tests.
 * [x] **Task 4.7 (Builder Integration):** Wire forgiving normalizer across Phases 1–4 builders and gates.
-* [ ] **Task 4.8 (Verification):** Prove bit-for-bit reproducibility and concordance performance.
+* [x] **Task 4.8 (Verification):** Prove bit-for-bit reproducibility and concordance performance.
+
+**Pinned Linux verification (`linux/amd64`, network disabled):** Task 4.5 collected and passed 366 tests; Task 4.6 passed 372 (approved baseline exceptions). Tasks 4.7 and 4.8 each passed 379 tests with zero failures, errors, skips, xfails, or deselections.
+
+The `fixture`, `phase3-local`, `hadith-local`, and `hadith-taqreeb-local` gates passed. Both Jalalayn databases passed local schema, coverage (6,236 entries and map rows), locked-source text, and Arabic FTS checks. Both roots preserved locked Quran core display and the five Arabic QUL Tafsirs’ HTML. All 50 input locks verified before and after; provenance and four original-export fingerprints were unchanged. The checkout and originals were mounted read-only. After the host command timed out, Jalalayn, the independent digest comparison, and the closing source checks completed on the same roots without rebuilding.
+
+Indexed concordance (`ATTACH`, no scan, correct rows), maxima over 20 warm samples per root: candidate 2.403994 ms (2403994 ns); rebuild 2.868889 ms (2868889 ns). Every sample was strictly below 10 ms.
+
+Task commits (4.5–4.7): `5b12294f67ee139302bc93d78460f5478a9d326a`, `be0730f36831a9bc3efbec22a952a0f6e57fe6a0`, `3dafad8a2d750520aa2f609ab51e18e46ae4906a`.
+
+**SHA-256:** 33/33 equal artifact pairs, including all 20 Arabic-FTS databases. Each digest was computed independently.
+
+| Profile/artifact | Candidate SHA-256 | Rebuild SHA-256 |
+| --- | --- | --- |
+| `phase3/audio-recitation-abdul-basit-mujawwad.json` | `b036482aab1c3727264b11eb6551f5913028e1a2b0af2e67970f196f8a61bef4` | `b036482aab1c3727264b11eb6551f5913028e1a2b0af2e67970f196f8a61bef4` |
+| `phase3/audio-recitation-abdul-basit-murattal.json` | `5e8591c68c3b34b341f36c3b1f9230cb0ea180672d05a6fe72b41c5412250e32` | `5e8591c68c3b34b341f36c3b1f9230cb0ea180672d05a6fe72b41c5412250e32` |
+| `phase3/audio-recitation-al-husary-muallim.json` | `a3131e5f24d8f055fa8efde87bc6ba4487865e30f5b47e29d279c4045fad8757` | `a3131e5f24d8f055fa8efde87bc6ba4487865e30f5b47e29d279c4045fad8757` |
+| `phase3/audio-recitation-al-husary-mujawwad.json` | `b798d8f542e0e9c846694d6c6afdfaedc41c44beef0d41166778c1b8c36cf0b8` | `b798d8f542e0e9c846694d6c6afdfaedc41c44beef0d41166778c1b8c36cf0b8` |
+| `phase3/audio-recitation-al-husary-murattal.json` | `11f6b2de7dc7e23485978c2c772672fab50b71eba070aa23463d4ea6063e90de` | `11f6b2de7dc7e23485978c2c772672fab50b71eba070aa23463d4ea6063e90de` |
+| `phase3/audio-recitation-al-minshawi-murattal.json` | `0c1079e3a7d92486a6460fd1065efaa479e4ecf7ce80cbc5df7091d33f571f3a` | `0c1079e3a7d92486a6460fd1065efaa479e4ecf7ce80cbc5df7091d33f571f3a` |
+| `phase3/audio-recitation-al-tablawi-murattal.json` | `1d4509d238ac7220030cf085565d82c840d2b28f674e10eecf701fc28f7de524` | `1d4509d238ac7220030cf085565d82c840d2b28f674e10eecf701fc28f7de524` |
+| `phase3/quran-core.db` | `6053009d6923cba57055ddb69c8f64d60cd9545a9311245fce0821252852b3c1` | `6053009d6923cba57055ddb69c8f64d60cd9545a9311245fce0821252852b3c1` |
+| `phase3/quran-morphology.db` | `d0d13d10768c4e15dbe99c4794fd9a7cc71fd31e388cbba9f48debd4bfcdc8d3` | `d0d13d10768c4e15dbe99c4794fd9a7cc71fd31e388cbba9f48debd4bfcdc8d3` |
+| `phase3/quran-mushaf-indopak-15.db` | `0017fd5ce4aab034a144fc88ed951378113088b8fa22c49deb31fa5c8cfe01df` | `0017fd5ce4aab034a144fc88ed951378113088b8fa22c49deb31fa5c8cfe01df` |
+| `phase3/quran-mushaf-madani-v2.db` | `399cb4acf5ab5e2b73c6ba67e34c0dd6121a120a87ae3a81a1681ae780b35e6b` | `399cb4acf5ab5e2b73c6ba67e34c0dd6121a120a87ae3a81a1681ae780b35e6b` |
+| `phase3/quran-tafsir-ar-ibn-kathir.db` | `05fffb3a3043f4624805061179d3bbc3fda15d4c70d6c0009be0e682f512e418` | `05fffb3a3043f4624805061179d3bbc3fda15d4c70d6c0009be0e682f512e418` |
+| `phase3/quran-tafsir-ar-qurtubi.db` | `b00559179228b24312e572a2c2cd2cd3f17159ff32a3f5ea5c12b759b1294642` | `b00559179228b24312e572a2c2cd2cd3f17159ff32a3f5ea5c12b759b1294642` |
+| `phase3/quran-tafsir-ar-razi.db` | `681361d2f64ab7783beeffe8d9d01974244d0a80293f7591b7836bc1d30fcd6d` | `681361d2f64ab7783beeffe8d9d01974244d0a80293f7591b7836bc1d30fcd6d` |
+| `phase3/quran-tafsir-ar-tabari.db` | `fc67d68a20517ea2e5a626a5260da9aad5b1f2d3f8a3175d1d2677ec404472c0` | `fc67d68a20517ea2e5a626a5260da9aad5b1f2d3f8a3175d1d2677ec404472c0` |
+| `phase3/quran-tafsir-ar-wasit.db` | `e459e2d253d88afcd6f6799aae56066f38c4d163985508eb6ba7da64f0f8bdd4` | `e459e2d253d88afcd6f6799aae56066f38c4d163985508eb6ba7da64f0f8bdd4` |
+| `phase3/quran-tafsir-en-ibn-kathir.db` | `5d4ea10fc347a60ee04212e3cb62e9b4402e88417121a0bec6fb42cb40833290` | `5d4ea10fc347a60ee04212e3cb62e9b4402e88417121a0bec6fb42cb40833290` |
+| `phase3/quran-tr-en-sahih.db` | `53e21f87efde3fefd623e66cf6bbb42483a6f604217826b9a2fe3ff1afeb94bf` | `53e21f87efde3fefd623e66cf6bbb42483a6f604217826b9a2fe3ff1afeb94bf` |
+| `phase3/quran-wbw-en.db` | `dc5b66ca78ea641b495d284ef987fb506f82c734536b6940073fbc0f575eb5ff` | `dc5b66ca78ea641b495d284ef987fb506f82c734536b6940073fbc0f575eb5ff` |
+| `jalalayn/quran-tafsir-ar-jalalayn.db` | `2b4b83607f0aa4ca8465c3a6e21376cefd2658fe2d8530cacca896df4cff9424` | `2b4b83607f0aa4ca8465c3a6e21376cefd2658fe2d8530cacca896df4cff9424` |
+| `hadith/hadith-abudawud.db` | `90de23fc9e0ef45befeb95d22749b73f650b9808d99ace1b379f654c03ef56bf` | `90de23fc9e0ef45befeb95d22749b73f650b9808d99ace1b379f654c03ef56bf` |
+| `hadith/hadith-ahmad.db` | `ab9c442a9575077e4d1c6712b82b2653fb24e76d3c1c2aa031977c1b5721d80f` | `ab9c442a9575077e4d1c6712b82b2653fb24e76d3c1c2aa031977c1b5721d80f` |
+| `hadith/hadith-bukhari.db` | `b1ce3ca38b5f0fecb45391e5091dacc83878526ceaa88fe430cc465ea54771ce` | `b1ce3ca38b5f0fecb45391e5091dacc83878526ceaa88fe430cc465ea54771ce` |
+| `hadith/hadith-darimi.db` | `74e8378bccbcb091b01b353e301ff1ef2927f365056f4bb856b914aced4f1853` | `74e8378bccbcb091b01b353e301ff1ef2927f365056f4bb856b914aced4f1853` |
+| `hadith/hadith-ibnmajah.db` | `1ace0527edf0dfce919c7afdf2c25365315130724222c9290ee69bb86df39774` | `1ace0527edf0dfce919c7afdf2c25365315130724222c9290ee69bb86df39774` |
+| `hadith/hadith-malik.db` | `aa925d818d61847b81eb22c8fb53f49b24219c4245daa58e022f235aa5bac8b0` | `aa925d818d61847b81eb22c8fb53f49b24219c4245daa58e022f235aa5bac8b0` |
+| `hadith/hadith-muslim.db` | `ac8e735fe9823992145a2629382115e7df406fd01322da40f8fd65245616edd4` | `ac8e735fe9823992145a2629382115e7df406fd01322da40f8fd65245616edd4` |
+| `hadith/hadith-nasai.db` | `ca14cbc58132f6e48bedc1fe5377b8237d03a34e72bb9dde91737b556f09deec` | `ca14cbc58132f6e48bedc1fe5377b8237d03a34e72bb9dde91737b556f09deec` |
+| `hadith/hadith-tirmidhi.db` | `3c1fe0e6550f764ef214e7e19ae406747feb0b719c37aa6da194574ffbcd5596` | `3c1fe0e6550f764ef214e7e19ae406747feb0b719c37aa6da194574ffbcd5596` |
+| `taqreeb/hadith-taqreeb-jami.db` | `1cbd6a246fadb57055bb78da8700f8b71ac36aa4c1b84fc8a3053b64639eae1b` | `1cbd6a246fadb57055bb78da8700f8b71ac36aa4c1b84fc8a3053b64639eae1b` |
+| `taqreeb/hadith-taqreeb-kulliyyah.db` | `60fd1651c390dcb869faad93fa890186cad4a86f3a70539c7febb6eadf585d31` | `60fd1651c390dcb869faad93fa890186cad4a86f3a70539c7febb6eadf585d31` |
+| `taqreeb/hadith-taqreeb-maalim.db` | `5fe53c2318172bfca145cc6dde209286a189968bc9b7f071a2c2a9bbfa5ac6b0` | `5fe53c2318172bfca145cc6dde209286a189968bc9b7f071a2c2a9bbfa5ac6b0` |
+| `taqreeb/hadith-taqreeb-wajeez.db` | `b386f427cb2543512ea7960a7cdb156782f5bdf09a01fe8d09ba9fd94fa99bad` | `b386f427cb2543512ea7960a7cdb156782f5bdf09a01fe8d09ba9fd94fa99bad` |
 
 ---
 
