@@ -75,10 +75,10 @@ def load_and_validate_intake(sources_root: Path) -> list[dict[str, Any]]:
         if not isinstance(reciter, str) or not reciter.strip():
             raise ValueError(f"Blank or non-string reciter at index {idx}: {reciter!r}")
 
-        if not isinstance(sha256_val, str) or not _SHA256_RE.match(sha256_val):
+        if not isinstance(sha256_val, str) or not _SHA256_RE.fullmatch(sha256_val):
             raise ValueError(f"Invalid sha256 hex digest at index {idx}: {sha256_val!r}")
 
-        if not isinstance(slug, str) or not _SLUG_RE.match(slug):
+        if not isinstance(slug, str) or not _SLUG_RE.fullmatch(slug):
             raise ValueError(f"Invalid slug at index {idx}: {slug!r}")
 
         lower_b = basename.lower()

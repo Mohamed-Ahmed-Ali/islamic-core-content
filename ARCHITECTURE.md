@@ -274,7 +274,7 @@ Apply `specs/sql/common_meta.sql` then exactly one checked-in pack schema to a f
   - **Phase 2:** Canonical Hadith verified Matn in `hadiths_fts` (`arabic_matn_clean`) and unsplit Arabic in `hadiths_full_fts` (`arabic_full_clean`);
   - **Phase 3:** Five Arabic QUL Tafsirs in `tafsir_fts` (`text_ar_search` after plain-text projection);
   - **Phase 4:** Mashrūʿ Taqrīb `hadiths_fts` on `text_ar_search`.
-- **Client query contract:** Normalize user literals via `arabic_match_literal` **before** quoting as FTS phrases (trim, double embedded `"`, and wrap in outer `"`) and binding to `MATCH ?`; empty normalization yields no search (`None`). See §8 for consumer implementation details and examples.
+- **Client query contract:** `arabic_match_literal` normalizes user literals and trims the result; it returns `None` if nothing remains. Otherwise it doubles embedded `"` characters and wraps the result in outer `"`. Bind the returned phrase directly to `MATCH ?`; do not quote it again. See §8 for consumer implementation details and examples.
 - **Tokenizer caveat:** SQLite's [`unicode61 remove_diacritics`](https://www.sqlite.org/fts5.html#unicode61_tokenizer) handles Latin-script diacritics, not Arabic. `رَبِّ` and `رب` must produce the same expected row IDs; the fixture's `كتب` query must return none.
 
 ### 6.1 `quran-core.db` (`specs/sql/quran_core.v1.sql`)
@@ -791,9 +791,22 @@ Encode from audio stream `0:a:0`, one channel with FFmpeg's standard mono mix an
 
 ### 7.3.1 Private local Adhan intake inventory (`sources/adhan-local-intake.json`)
 
-The private local Adhan intake is separate from the shared production registry and lock. `sources/adhan-local-intake.json` tracks 25 local master MP3 files staged from `Contant/adhan/` to `raw-inputs/audio/adhan-local/` by `python -m pipelines.builders.build_audio_adhan_local stage`. It records local provenance and rights-review metadata for local-only verification; it is not a release clearance artifact.
+The private local Adhan intake is separate from the shared production registry and lock. `sources/adhan-local-intake.json` tracks 25 local master MP3 files staged from `Contant/adhan/` to `raw-inputs/audio/adhan-local/` by:
 
-`python -m pipelines.builders.build_audio_adhan_local build --sources-root S --output-dir O` builds exactly 50 derivatives from those 25 masters: one full M4A (`adhan-{slug}-full.m4a`) plus one iOS CAF (`adhan-{slug}-ios-notif.caf`) per slug. Derivatives must satisfy the same codec/sample-rate/duration/probe rules as §7.2, and local quality gates verify deterministic bytes across independent builds.
+```sh
+python -m pipelines.builders.build_audio_adhan_local stage --sources-root S
+```
+
+It records local provenance and rights-review metadata for local-only verification; it is not a release clearance artifact.
+
+Each of the following commands builds exactly 50 derivatives from those 25 masters: one full M4A (`adhan-{slug}-full.m4a`) plus one iOS CAF (`adhan-{slug}-ios-notif.caf`) per slug. Use initially nonexistent output directories:
+
+```sh
+python -m pipelines.builders.build_audio_adhan_local build --sources-root S --output-dir dist/adhan-local/candidate
+python -m pipelines.builders.build_audio_adhan_local build --sources-root S --output-dir dist/adhan-local/rebuild
+```
+
+Derivatives must satisfy the same codec, sample-rate, duration and probe rules as §7.2. Compare the complete relative filename sets (50 files each) and per-file SHA-256 values across the two roots. No quality-gate profile covers these derivatives; this comparison is their local determinism check.
 
 Because this intake is private and rights remain pending, none of these local-only tracks or derivatives are included in release profiles, release manifests, or public uploads.
 
@@ -858,7 +871,7 @@ Run in this order, failing fast at the first offending asset in lexical path ord
 | `v0.1.0` (Phase 1) | #1–#7 and #9 as applicable to all five SQLite packs and both variants of each of the six tracks. #8 is not applicable: no QUL WBW pack. No partial coverage or missing item permitted. |
 | `hadith-pilot` (Local only) | Flat DB-only roots for `hadith-bukhari.db` and `hadith-muslim.db`. Verifies canonical lock, pending licenses ('Clearance pending (local verification only)'), SQLite schema, keys, text, coverage, dual FTS token coverage and queries, and cross-root byte equality. Manifest checks and #8/#9 not applicable. |
 | `hadith-local` (Local only) | Flat DB-only roots for all nine Hadith packs (`bukhari`, `muslim`, `nasai`, `abudawud`, `tirmidhi`, `ibnmajah`, `malik`, `darimi`, `ahmad`). Same local checks across the entire nine-pack inventory. |
-| `phase3-local` (Local only) | Exactly 12 SQLite packs and seven recitation timing manifests from `pipelines.release.build_phase3_local`: rebuilt `quran-core.db` and `quran-morphology.db` plus 10 QUL SQLite packs (2 translations, 5 tafsirs, 2 mushaf layouts, 1 WBW), with no catalog or audio files. Reconciles both roots against locked sources, applies #8 and #9, and checks all 19 sizes and SHA-256 digests. Passing this profile does not clear redistribution rights. |
+| `phase3-local` (Local only) | Exactly 12 SQLite packs and seven recitation timing manifests from `pipelines.release.build_phase3_local`: rebuilt `quran-core.db` and `quran-morphology.db` plus 10 QUL SQLite packs (1 translation, 6 tafsirs, 2 mushaf layouts, 1 WBW), with no catalog or audio files. Reconciles both roots against locked sources, applies #8 and #9, and checks all 19 sizes and SHA-256 digests. Passing this profile does not clear redistribution rights. |
 | `hadith-taqreeb-local` (Phase 4, local only) | Flat DB-only roots for the four Taqreeb packs (`hadith-taqreeb-jami.db`, `hadith-taqreeb-maalim.db`, `hadith-taqreeb-wajeez.db`, `hadith-taqreeb-kulliyyah.db`). Verifies canonical lock, pending licenses ('Clearance pending (local verification only)'), SQLite schema, source fidelity and row-by-row traversal against original Realm JSON exports, exact anomaly preservation, coverage metrics, FTS5 token search and integrity, and cross-root byte equality. Manifest checks and #8/#9 not applicable. |
 
 Build and verify the Phase 3 roots in the pinned Linux runtime, with networking disabled:

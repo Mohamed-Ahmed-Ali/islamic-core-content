@@ -21,6 +21,7 @@ from pipelines.builders.build_audio_adhan import (
     load_adhan_license,
     main,
 )
+from pipelines.builders.build_audio_adhan_local import load_and_validate_intake
 
 ORDERED_PATHS = (
     "audio/adhan/abdul-basit-abdul-samad-2.mp3",
@@ -496,6 +497,26 @@ def test_loudnorm_strict_json_validation(
         )
         with pytest.raises(ValueError, match=r"(?i)(token|numeric|loudnorm|decimal)"):
             _measure_loudnorm(ffmpeg_path, test_audio)
+
+
+@pytest.mark.parametrize("field", ("sha256", "slug"))
+def test_local_adhan_rejects_trailing_newline(tmp_path: Path, field: str) -> None:
+    intake_dir = tmp_path / "sources"
+    intake_dir.mkdir()
+    track = {
+        "basename": "sample.mp3",
+        "reciter": "Sample Reciter",
+        "sha256": "a" * 64,
+        "slug": "sample",
+    }
+    track[field] += "\n"
+    intake = {"status": "pending", "tracks": [track]}
+    (intake_dir / "adhan-local-intake.json").write_text(
+        json.dumps(intake), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError):
+        load_and_validate_intake(tmp_path)
 
 
 def test_local_adhan_stages_and_builds_only_pinned_tracks(tmp_path: Path) -> None:
